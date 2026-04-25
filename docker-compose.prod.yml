@@ -1,0 +1,62 @@
+# Production Docker Compose Override for AWS
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+version: "3.8"
+
+services:
+  backend:
+    restart: always
+    # For production on AWS, uncomment to set resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 512M
+    
+    # For security: don't expose directly, use reverse proxy
+    ports:
+      - "127.0.0.1:8000:8000"  # Only localhost
+    
+    environment:
+      # Production settings
+      - HEADLESS=true
+      - POST_MODE=publish  # Use real posting in production
+      # Keep others from .env
+
+  frontend:
+    restart: always
+    # For production on AWS, uncomment to set resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 256M
+    
+    # For security: don't expose directly, use reverse proxy
+    ports:
+      - "127.0.0.1:8501:8501"  # Only localhost
+    
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_LOGGER_LEVEL=error
+
+# Example AWS Security:
+# 1. Use Security Group with:
+#    - Port 22 (SSH): Restrict to your IP only
+#    - Port 80 (HTTP): Allow from 0.0.0.0/0
+#    - Port 443 (HTTPS): Allow from 0.0.0.0/0
+#    - Ports 8000, 8501: DENY (use Nginx proxy instead)
+#
+# 2. Set up Nginx reverse proxy on host
+# 3. Use Let's Encrypt SSL certificate
+# 4. Set up CloudWatch monitoring
+# 5. Configure automated backups
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d

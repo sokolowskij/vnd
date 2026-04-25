@@ -1,0 +1,34 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Local app state and reviewer/product data
+data/
+browser_profiles/
+results/
+test_results/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+dist/
+*.egg
+
+# Docker/local runtime
+.streamlit/
