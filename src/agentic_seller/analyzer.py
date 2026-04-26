@@ -18,22 +18,23 @@ class ListingAnalyzer:
         # the analyzer to work with a generic local endpoint (like LM Studio or Ollama)
         # which is the common way to use 'free' models in a dev environment.
         self.api_base = os.getenv("LOCAL_MODEL_API", "http://localhost:1234/v1")
-        # Ensure we don't accidentally hit the real OpenAI API if we want local
-        is_local = "localhost" in self.api_base or "127.0.0.1" in self.api_base
+        self.use_local_model = bool(os.getenv("LOCAL_MODEL_API")) and "api.openai.com" not in self.api_base
         
-        if settings.openai_api_key or is_local:
+        if settings.openai_api_key or self.use_local_model:
             from openai import OpenAI
             # LM Studio requires 'lm-studio' as the key if auth is enabled, 
             # or it might complain if the key looks like a placeholder.
             # In your log it suggests 'sk-lm-...' so we'll try to be flexible.
             api_key = settings.openai_api_key
-            if is_local and (not api_key or "not-needed" in api_key):
+            if self.use_local_model and (not api_key or "not-needed" in api_key):
                 api_key = "lm-studio"
                 
             self.client = OpenAI(
                 api_key=api_key,
-                base_url=self.api_base if is_local else None
+                base_url=self.api_base if self.use_local_model else None,
             )
+            if self.use_local_model:
+                print(f"  [MODEL] Using local OpenAI-compatible endpoint: {self.api_base}")
         else:
             self.client = None
 
@@ -72,17 +73,15 @@ class ListingAnalyzer:
         if not self.client:
             return self._fallback_plan(product)
 
-        is_local = "localhost" in self.api_base or "127.0.0.1" in self.api_base
-        
         # Try different image counts to manage local model context limits
-        counts_to_try = [4, 2, 1] if is_local else [len(product.image_paths)]
+        counts_to_try = [4, 2, 1] if self.use_local_model else [len(product.image_paths)]
         
         for count in counts_to_try:
             image_blocks = []
             selected_paths = product.image_paths[:count]
             
             for path in selected_paths:
-                if is_local:
+                if self.use_local_model:
                     try:
                         with open(path, "rb") as image_file:
                             data = image_file.read()
@@ -122,7 +121,7 @@ class ListingAnalyzer:
                 prompt += f"\n\nOpis użytkownika:\n{product.optional_text}"
 
             try:
-                if is_local:
+                if self.use_local_model:
                     resp = self.client.chat.completions.create(
                         model=self.settings.openai_model,
                         messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, *image_blocks]}],
