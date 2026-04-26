@@ -1,25 +1,21 @@
-"""Streamlit dashboard for Agentic Seller job submission and review."""
+"""Streamlit review portal for Agentic Seller."""
 
 from __future__ import annotations
 
+import json
 import os
+from io import BytesIO
 
 import requests
 import streamlit as st
 
-st.set_page_config(
-    page_title="Agentic Seller Dashboard",
-    layout="wide",
-)
+st.set_page_config(page_title="Agentic Seller", layout="wide")
 
 API_URL = os.getenv("API_URL", "http://backend:8000")
 
-st.title("Agentic Seller Dashboard")
-st.caption("Upload product files, run listing jobs, and review status.")
 
-
-def api_get(path: str) -> dict:
-    response = requests.get(f"{API_URL}{path}", timeout=10)
+def api_get(path: str, **kwargs) -> dict:
+    response = requests.get(f"{API_URL}{path}", timeout=15, **kwargs)
     response.raise_for_status()
     return response.json()
 
@@ -30,176 +26,300 @@ def api_post(path: str, **kwargs) -> dict:
     return response.json()
 
 
-page = st.sidebar.radio(
-    "Navigation",
-    ["Dashboard", "Upload Product", "Submit Job", "Job Details"],
-)
+def api_put(path: str, **kwargs) -> dict:
+    response = requests.put(f"{API_URL}{path}", timeout=30, **kwargs)
+    response.raise_for_status()
+    return response.json()
 
-if page == "Dashboard":
-    st.header("Job Overview")
+
+def api_bytes(path: str) -> bytes:
+    response = requests.get(f"{API_URL}{path}", timeout=20)
+    response.raise_for_status()
+    return response.content
+
+
+def current_user() -> dict | None:
+    return st.session_state.get("user")
+
+
+def logout() -> None:
+    st.session_state.pop("user", None)
+    st.rerun()
+
+
+def show_auth() -> None:
+    st.title("Agentic Seller")
+    st.caption("Product intake and listing approval.")
 
     try:
-        jobs_data = api_get("/jobs")
-        jobs = jobs_data.get("jobs", [])
+        configured = api_get("/auth/status").get("configured", False)
     except requests.exceptions.RequestException as exc:
-        st.error(f"Failed to connect to backend: {exc}")
-        jobs = []
+        st.error(f"Backend unavailable: {exc}")
+        st.stop()
 
-    if jobs:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Pending", sum(1 for job in jobs if job.get("status") == "pending"))
-        col2.metric("Running", sum(1 for job in jobs if job.get("status") == "running"))
-        col3.metric("Completed", sum(1 for job in jobs if job.get("status") == "completed"))
-        col4.metric("Failed", sum(1 for job in jobs if job.get("status") == "failed"))
+    if not configured:
+        st.subheader("Create Boss Account")
+        with st.form("setup_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Create account")
+        if submitted:
+            try:
+                user = api_post("/auth/setup", json={"username": username, "password": password})
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Setup failed: {exc}")
+            else:
+                st.session_state["user"] = user
+                st.rerun()
+        st.stop()
 
-        st.subheader("Recent Jobs")
-        for job in jobs[:10]:
-            title = f"{job['job_id'][:8]} | {job['mode']} | {job.get('status', 'unknown')}"
-            with st.expander(title):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"Job ID: `{job['job_id']}`")
-                    st.write(f"Status: `{job.get('status', 'unknown')}`")
-                    st.write(f"Mode: `{job['mode']}`")
-                with col2:
-                    st.write(f"Created: `{job['created_at']}`")
-                    if job.get("completed_at"):
-                        st.write(f"Completed: `{job['completed_at']}`")
+    st.subheader("Sign In")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+    if submitted:
+        try:
+            user = api_post("/auth/login", json={"username": username, "password": password})
+        except requests.exceptions.RequestException:
+            st.error("Invalid username or password.")
+        else:
+            st.session_state["user"] = user
+            st.rerun()
+    st.stop()
 
-                st.write(f"Data directory: `{job['data_dir']}`")
-                st.write(f"Marketplaces: `{', '.join(job.get('marketplaces', []))}`")
-                if job.get("error"):
-                    st.error(job["error"])
-    else:
-        st.info("No jobs yet. Upload a product, then submit a dry-run job.")
 
-    st.header("Uploaded Products")
-    try:
-        products_data = api_get("/products")
-        products = products_data.get("products", [])
-    except requests.exceptions.RequestException as exc:
-        st.error(f"Failed to load products: {exc}")
-        products = []
+def product_badge(status: str) -> str:
+    labels = {
+        "awaiting_generation": "Awaiting generation",
+        "awaiting_review": "Awaiting review",
+        "ready_to_publish": "Ready to publish",
+    }
+    return labels.get(status, status.replace("_", " ").title())
 
-    if products:
-        for product in products:
-            with st.expander(product["product_id"]):
-                st.write(f"Directory: `{product['product_dir']}`")
-                st.write(", ".join(product.get("files", [])) or "No files")
-    else:
-        st.info("No uploaded products found.")
 
-elif page == "Upload Product":
-    st.header("Upload Product")
+def show_thumbnails(product: dict, max_images: int = 8) -> None:
+    images = product.get("images", [])[:max_images]
+    if not images:
+        st.info("No photos uploaded.")
+        return
 
-    with st.form("upload_product_form", clear_on_submit=False):
-        product_name = st.text_input("Product name")
-        notes = st.text_area("Optional notes", height=120)
-        files = st.file_uploader(
-            "Photos and optional product notes",
-            type=["jpg", "jpeg", "png", "webp", "txt", "md", "docx"],
-            accept_multiple_files=True,
-        )
-        submitted = st.form_submit_button("Upload")
+    columns = st.columns(min(4, len(images)))
+    for index, image_name in enumerate(images):
+        with columns[index % len(columns)]:
+            try:
+                content = api_bytes(f"/products/{product['product_id']}/files/{image_name}")
+            except requests.exceptions.RequestException:
+                st.warning(image_name)
+            else:
+                st.image(BytesIO(content), caption=image_name, use_container_width=True)
+
+
+def product_table(products: list[dict]) -> None:
+    if not products:
+        st.info("No items yet.")
+        return
+
+    for product in products:
+        cols = st.columns([3, 2, 2, 2])
+        cols[0].write(f"**{product['title']}**")
+        cols[1].write(product_badge(product["status"]))
+        cols[2].write(product.get("category") or "-")
+        price = product.get("price")
+        cols[3].write(f"{price:.0f} PLN" if isinstance(price, (int, float)) else "-")
+
+
+def upload_page() -> None:
+    st.header("Upload Items")
+    left, right = st.columns([2, 1])
+
+    with left:
+        with st.form("upload_product_form", clear_on_submit=True):
+            product_name = st.text_input("Item name")
+            notes = st.text_area("Notes", height=120)
+            files = st.file_uploader(
+                "Photos and documents",
+                type=["jpg", "jpeg", "png", "webp", "txt", "md", "docx"],
+                accept_multiple_files=True,
+            )
+            submitted = st.form_submit_button("Upload")
+
+    with right:
+        st.metric("Accepted formats", "JPG PNG WEBP")
+        st.metric("Listing source", "Local runner")
 
     if submitted:
         if not product_name.strip():
-            st.error("Product name is required.")
+            st.error("Item name is required.")
         elif not files:
-            st.error("Select at least one photo or product file.")
+            st.error("Add at least one photo or document.")
         else:
             multipart_files = [
                 ("files", (file.name, file.getvalue(), file.type or "application/octet-stream"))
                 for file in files
             ]
-            data = {"product_name": product_name, "notes": notes}
-
             try:
-                result = api_post("/uploads/products", data=data, files=multipart_files)
+                result = api_post(
+                    "/uploads/products",
+                    data={"product_name": product_name, "notes": notes},
+                    files=multipart_files,
+                )
             except requests.exceptions.RequestException as exc:
                 st.error(f"Upload failed: {exc}")
             else:
-                st.success(f"Uploaded `{result['product_id']}` to `{result['product_dir']}`")
-                st.write("Saved files:")
-                st.write(", ".join(result["saved_files"]))
+                st.success(f"Uploaded {result['product_id']}")
 
-elif page == "Submit Job":
-    st.header("Submit Job")
+
+def items_page() -> None:
+    st.header("Items")
+    try:
+        products = api_get("/products").get("products", [])
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Could not load items: {exc}")
+        return
+
+    pending = [p for p in products if p["status"] != "ready_to_publish"]
+    ready = [p for p in products if p["status"] == "ready_to_publish"]
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("In review", len(pending))
+    col2.metric("Ready", len(ready))
+    col3.metric("All items", len(products))
+
+    tab_pending, tab_ready = st.tabs(["In Review", "Ready"])
+    with tab_pending:
+        product_table(pending)
+    with tab_ready:
+        product_table(ready)
+
+
+def review_page() -> None:
+    st.header("Boss Review")
 
     try:
-        products_data = api_get("/products")
-        default_data_dir = products_data.get("data_dir", "/app/data/products")
-        products = products_data.get("products", [])
-    except requests.exceptions.RequestException:
-        default_data_dir = "/app/data/products"
-        products = []
+        products = api_get("/products").get("products", [])
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Could not load items: {exc}")
+        return
 
-    if products:
-        st.info(f"{len(products)} uploaded product folder(s) found in `{default_data_dir}`.")
-    else:
-        st.warning("No uploaded product folders found yet.")
+    reviewable = [p for p in products if p["status"] != "ready_to_publish"]
+    if not reviewable:
+        st.info("No items waiting for review.")
+        return
 
-    with st.form("job_form"):
-        data_dir = st.text_input("Data directory", value=default_data_dir)
-        mode = st.radio("Posting mode", ["dry_run", "publish"])
-        marketplaces = st.multiselect(
-            "Target marketplaces",
-            ["olx", "facebook", "ceneo"],
-            default=["olx", "facebook"],
-        )
-        submitted = st.form_submit_button("Start Job")
+    options = {f"{p['title']} ({product_badge(p['status'])})": p["product_id"] for p in reviewable}
+    selected_label = st.selectbox("Item", list(options.keys()))
+    product_id = options[selected_label]
 
-    if submitted:
-        if not data_dir.strip():
-            st.error("Data directory cannot be empty.")
-        elif not marketplaces:
-            st.error("Select at least one marketplace.")
-        else:
-            payload = {
-                "data_dir": data_dir,
-                "mode": mode,
-                "marketplaces": marketplaces,
-            }
+    try:
+        product = api_get(f"/products/{product_id}")
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Could not load item: {exc}")
+        return
+
+    left, right = st.columns([1.1, 1])
+    with left:
+        show_thumbnails(product)
+
+    listing = product.get("listing") or {}
+    image_paths = listing.get("image_paths") or []
+    current_cover = listing.get("cover_image")
+    attributes = listing.get("attributes") or {}
+
+    with right:
+        st.write(f"Status: **{product_badge(product['status'])}**")
+        if not listing:
+            st.warning("No generated listing yet. Run the local generator, then sync or refresh this item.")
+
+        with st.form(f"review_form_{product_id}"):
+            title = st.text_input("Title", value=listing.get("title", product["product_id"]))
+            price = st.number_input("Price", min_value=0.0, value=float(listing.get("price") or 0.0), step=1.0)
+            currency = st.text_input("Currency", value=listing.get("currency", "PLN"))
+            category = st.text_input("Category", value=listing.get("category", ""))
+            condition = st.text_input("Condition", value=listing.get("condition", ""))
+            description = st.text_area("Description", value=listing.get("description", ""), height=240)
+            attrs_text = st.text_area(
+                "Attributes JSON",
+                value=json.dumps(attributes, ensure_ascii=False, indent=2),
+                height=140,
+            )
+            cover_options = image_paths or [str(product["product_dir"] + "/" + name) for name in product.get("images", [])]
+            cover_index = cover_options.index(current_cover) if current_cover in cover_options else 0
+            cover_image = st.selectbox("Cover image", cover_options, index=cover_index) if cover_options else None
+
+            save_clicked = st.form_submit_button("Save Changes")
+
+        if save_clicked:
             try:
-                job = api_post("/jobs", json=payload)
+                parsed_attrs = json.loads(attrs_text) if attrs_text.strip() else {}
+            except json.JSONDecodeError as exc:
+                st.error(f"Attributes must be valid JSON: {exc}")
+            else:
+                payload = {
+                    "title": title,
+                    "description": description,
+                    "price": price,
+                    "currency": currency,
+                    "category": category,
+                    "condition": condition,
+                    "attributes": parsed_attrs,
+                    "cover_image": cover_image,
+                }
+                try:
+                    api_put(f"/products/{product_id}/listing", json=payload)
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Save failed: {exc}")
+                else:
+                    st.success("Saved.")
+                    st.rerun()
+
+        if listing and st.button("Approve For Publishing", type="primary"):
+            try:
+                api_post(f"/products/{product_id}/approve", data={"username": current_user()["username"]})
             except requests.exceptions.RequestException as exc:
-                st.error(f"Failed to submit job: {exc}")
+                st.error(f"Approval failed: {exc}")
             else:
-                st.success(f"Job started: `{job['job_id']}`")
+                st.success("Approved and moved to ready.")
+                st.rerun()
 
-elif page == "Job Details":
-    st.header("Job Details")
 
-    job_id = st.text_input("Job ID")
-
-    if job_id:
+def users_page() -> None:
+    st.header("Users")
+    with st.form("create_user_form"):
+        username = st.text_input("New username")
+        password = st.text_input("Password", type="password")
+        role = st.selectbox("Role", ["user", "boss"])
+        submitted = st.form_submit_button("Create user")
+    if submitted:
         try:
-            job = api_get(f"/jobs/{job_id}")
-        except requests.exceptions.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 404:
-                st.error(f"Job `{job_id}` was not found.")
-            else:
-                st.error(f"Error: {exc}")
+            api_post("/auth/users", json={"username": username, "password": password, "role": role})
         except requests.exceptions.RequestException as exc:
-            st.error(f"Failed to fetch job details: {exc}")
+            st.error(f"Could not create user: {exc}")
         else:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"Job ID: `{job['job_id']}`")
-                st.write(f"Status: `{job.get('status', 'unknown')}`")
-                st.write(f"Mode: `{job['mode']}`")
-            with col2:
-                st.write(f"Created: `{job['created_at']}`")
-                if job.get("completed_at"):
-                    st.write(f"Completed: `{job['completed_at']}`")
+            st.success(f"Created {username}")
 
-            st.write(f"Data directory: `{job['data_dir']}`")
-            st.write(f"Marketplaces: `{', '.join(job.get('marketplaces', []))}`")
 
-            if job.get("result_path"):
-                st.info(f"Results stored under `{job['result_path']}`.")
-            if job.get("error"):
-                st.error(job["error"])
+if current_user() is None:
+    show_auth()
 
-st.divider()
-st.caption("Agentic Seller v0.1.0")
+user = current_user()
+st.sidebar.title("Agentic Seller")
+st.sidebar.caption(f"{user['username']} | {user['role']}")
+
+pages = ["Items", "Upload"]
+if user["role"] == "boss":
+    pages.extend(["Boss Review", "Users"])
+page = st.sidebar.radio("Workspace", pages)
+
+st.sidebar.divider()
+if st.sidebar.button("Sign out"):
+    logout()
+
+if page == "Items":
+    items_page()
+elif page == "Upload":
+    upload_page()
+elif page == "Boss Review":
+    review_page()
+elif page == "Users":
+    users_page()

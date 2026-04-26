@@ -1,28 +1,27 @@
-"""FastAPI backend for agentic seller pipeline."""
+"""FastAPI backend for the Agentic Seller review portal."""
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import re
-import uuid
-from concurrent.futures import ThreadPoolExecutor
+import secrets
+import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
-from .config import load_settings
-from .orchestrator import run_pipeline
-
-app = FastAPI(title="Agentic Seller API", version="0.1.0")
-executor = ThreadPoolExecutor(max_workers=1)
+app = FastAPI(title="Agentic Seller Review API", version="0.2.0")
 
 ALLOWED_UPLOAD_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".txt", ".md", ".docx"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
-# Add CORS middleware for Streamlit access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,62 +31,58 @@ app.add_middleware(
 )
 
 
-class JobRequest(BaseModel):
-    """Request to run a pipeline job."""
-
-    data_dir: str
-    mode: str = "dry_run"
-    marketplaces: list[str] = ["olx", "facebook"]
+class AuthRequest(BaseModel):
+    username: str
+    password: str
 
 
-class JobResponse(BaseModel):
-    """Response with job details."""
-
-    job_id: str
-    status: str
-    created_at: str
-    data_dir: str
-    mode: str
+class UserCreateRequest(AuthRequest):
+    role: str = "user"
 
 
-class JobResult(BaseModel):
-    """Result of a completed job."""
-
-    job_id: str
-    status: str
-    created_at: str
-    completed_at: Optional[str] = None
-    data_dir: str
-    mode: str
-    result_path: Optional[str] = None
-    error: Optional[str] = None
+class ListingUpdate(BaseModel):
+    title: str
+    description: str
+    price: float
+    currency: str = "PLN"
+    category: str
+    condition: str
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    cover_image: str | None = None
 
 
 class UploadResponse(BaseModel):
-    """Response after uploading product files."""
-
     product_id: str
     product_dir: str
     saved_files: list[str]
 
 
-def get_jobs_dir() -> Path:
-    """Get or create jobs directory."""
-    jobs_dir = Path("/app/data/jobs") if Path("/app").exists() else Path("./data/jobs")
-    jobs_dir.mkdir(parents=True, exist_ok=True)
-    return jobs_dir
+def data_root() -> Path:
+    root = Path("/app/data") if Path("/app").exists() else Path("./data")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
-def get_products_dir() -> Path:
-    """Get or create products directory."""
-    products_dir = Path("/app/data/products") if Path("/app").exists() else Path("./data/products")
-    products_dir.mkdir(parents=True, exist_ok=True)
-    return products_dir
+def products_dir() -> Path:
+    path = data_root() / "products"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
-def get_job_path(job_id: str) -> Path:
-    """Get path to job metadata file."""
-    return get_jobs_dir() / f"{job_id}.json"
+def ready_dir() -> Path:
+    path = data_root() / "ready_to_publish"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def auth_dir() -> Path:
+    path = data_root() / "auth"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def users_path() -> Path:
+    return auth_dir() / "users.json"
 
 
 def _safe_name(value: str) -> str:
@@ -98,75 +93,146 @@ def _safe_name(value: str) -> str:
     return cleaned[:100]
 
 
-def _save_job_metadata(metadata: dict) -> None:
-    get_job_path(metadata["job_id"]).write_text(json.dumps(metadata, indent=2))
+def _read_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def create_job_metadata(
-    job_id: str, data_dir: str, mode: str, marketplaces: list[str]
-) -> dict:
-    """Create job metadata."""
-    return {
-        "job_id": job_id,
-        "status": "pending",
-        "created_at": datetime.utcnow().isoformat(),
-        "completed_at": None,
-        "data_dir": data_dir,
-        "mode": mode,
-        "marketplaces": marketplaces,
-        "result_path": None,
-        "error": None,
-    }
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _run_job(job_id: str) -> None:
-    job_path = get_job_path(job_id)
-    metadata = json.loads(job_path.read_text())
-    metadata["status"] = "running"
-    _save_job_metadata(metadata)
+def _load_users() -> dict[str, dict[str, str]]:
+    return _read_json(users_path(), {})
 
+
+def _save_users(users: dict[str, dict[str, str]]) -> None:
+    _write_json(users_path(), users)
+
+
+def _password_hash(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 150_000)
+    return f"{salt}${base64.b64encode(digest).decode('ascii')}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
     try:
-        settings = load_settings()
-        run_pipeline(
-            Path(metadata["data_dir"]),
-            settings,
-            mode=metadata["mode"],
-            selected_marketplaces=metadata["marketplaces"],
-        )
-    except Exception as exc:
-        metadata["status"] = "failed"
-        metadata["completed_at"] = datetime.utcnow().isoformat()
-        metadata["error"] = str(exc)
-    else:
-        metadata["status"] = "completed"
-        metadata["completed_at"] = datetime.utcnow().isoformat()
-        metadata["result_path"] = metadata["data_dir"]
+        salt, expected = stored.split("$", 1)
+    except ValueError:
+        return False
+    return secrets.compare_digest(_password_hash(password, salt).split("$", 1)[1], expected)
 
-    _save_job_metadata(metadata)
+
+def _product_path(product_id: str, include_ready: bool = True) -> Path:
+    safe_id = _safe_name(product_id)
+    candidates = [products_dir() / safe_id]
+    if include_ready:
+        candidates.append(ready_dir() / safe_id)
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+    raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+
+
+def _product_status(product_dir: Path) -> str:
+    if product_dir.parent == ready_dir():
+        return "ready_to_publish"
+    status = _read_json(product_dir / "review_status.json", {})
+    current = status.get("status")
+    if current == "awaiting_generation" and (product_dir / "listing_plan.json").exists():
+        return "awaiting_review"
+    return current or "awaiting_review"
+
+
+def _list_product_files(product_dir: Path) -> list[str]:
+    return [p.name for p in sorted(product_dir.iterdir()) if p.is_file()]
+
+
+def _list_images(product_dir: Path) -> list[str]:
+    return [p.name for p in sorted(product_dir.iterdir()) if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
+
+
+def _listing_for(product_dir: Path) -> dict[str, Any] | None:
+    listing_path = product_dir / "listing_plan.json"
+    if not listing_path.exists():
+        return None
+    return _read_json(listing_path, None)
+
+
+def _product_summary(product_dir: Path) -> dict[str, Any]:
+    listing = _listing_for(product_dir)
+    status = _product_status(product_dir)
+    fallback_title = product_dir.name
+    return {
+        "product_id": product_dir.name,
+        "status": status,
+        "product_dir": str(product_dir),
+        "files": _list_product_files(product_dir),
+        "images": _list_images(product_dir),
+        "listing": listing,
+        "title": (listing or {}).get("title", fallback_title),
+        "price": (listing or {}).get("price"),
+        "category": (listing or {}).get("category"),
+        "condition": (listing or {}).get("condition"),
+    }
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
-@app.post("/jobs", response_model=JobResponse)
-async def submit_job(request: JobRequest):
-    """Submit a new pipeline job."""
-    job_id = str(uuid.uuid4())
-    metadata = create_job_metadata(job_id, request.data_dir, request.mode, request.marketplaces)
+@app.get("/auth/status")
+async def auth_status():
+    users = _load_users()
+    return {"configured": bool(users)}
 
-    _save_job_metadata(metadata)
-    executor.submit(_run_job, job_id)
 
-    return JobResponse(
-        job_id=job_id,
-        status="pending",
-        created_at=metadata["created_at"],
-        data_dir=request.data_dir,
-        mode=request.mode,
-    )
+@app.post("/auth/setup")
+async def setup_first_user(request: AuthRequest):
+    users = _load_users()
+    if users:
+        raise HTTPException(status_code=409, detail="Authentication is already configured")
+    username = _safe_name(request.username)
+    if len(request.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    users[username] = {
+        "password_hash": _password_hash(request.password),
+        "role": "boss",
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    _save_users(users)
+    return {"username": username, "role": "boss"}
+
+
+@app.post("/auth/login")
+async def login(request: AuthRequest):
+    users = _load_users()
+    user = users.get(request.username)
+    if not user or not _verify_password(request.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return {"username": request.username, "role": user.get("role", "user")}
+
+
+@app.post("/auth/users")
+async def create_user(request: UserCreateRequest):
+    users = _load_users()
+    username = _safe_name(request.username)
+    if username in users:
+        raise HTTPException(status_code=409, detail="User already exists")
+    role = request.role if request.role in {"user", "boss"} else "user"
+    if len(request.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    users[username] = {
+        "password_hash": _password_hash(request.password),
+        "role": role,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    _save_users(users)
+    return {"username": username, "role": role}
 
 
 @app.post("/uploads/products", response_model=UploadResponse)
@@ -175,12 +241,11 @@ async def upload_product(
     notes: str = Form(""),
     files: list[UploadFile] = File(...),
 ):
-    """Upload product files into the backend's persistent products directory."""
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one file")
 
     product_id = _safe_name(product_name)
-    product_dir = get_products_dir() / product_id
+    product_dir = products_dir() / product_id
     product_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files: list[str] = []
@@ -191,66 +256,94 @@ async def upload_product(
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename}")
 
         destination = product_dir / filename
-        content = await uploaded.read()
-        destination.write_bytes(content)
+        destination.write_bytes(await uploaded.read())
         saved_files.append(filename)
 
     if notes.strip():
         (product_dir / "notes.txt").write_text(notes.strip(), encoding="utf-8")
         saved_files.append("notes.txt")
 
-    return UploadResponse(
-        product_id=product_id,
-        product_dir=str(product_dir),
-        saved_files=saved_files,
+    _write_json(
+        product_dir / "review_status.json",
+        {"status": "awaiting_generation", "updated_at": datetime.utcnow().isoformat()},
     )
+    return UploadResponse(product_id=product_id, product_dir=str(product_dir), saved_files=saved_files)
 
 
 @app.get("/products")
-async def list_products():
-    """List uploaded products available to the pipeline."""
-    products_dir = get_products_dir()
-    products = []
-
-    for product_dir in sorted([p for p in products_dir.iterdir() if p.is_dir()]):
-        files = [p.name for p in sorted(product_dir.iterdir()) if p.is_file()]
-        products.append(
-            {
-                "product_id": product_dir.name,
-                "product_dir": str(product_dir),
-                "files": files,
-            }
-        )
-
-    return {"products": products, "data_dir": str(products_dir)}
+async def list_products(status: str | None = None):
+    product_dirs = [p for p in products_dir().iterdir() if p.is_dir()]
+    product_dirs += [p for p in ready_dir().iterdir() if p.is_dir()]
+    products = [_product_summary(path) for path in sorted(product_dirs, key=lambda p: p.name.lower())]
+    if status:
+        products = [product for product in products if product["status"] == status]
+    return {
+        "products": products,
+        "products_dir": str(products_dir()),
+        "ready_dir": str(ready_dir()),
+    }
 
 
-@app.get("/jobs/{job_id}", response_model=JobResult)
-async def get_job(job_id: str):
-    """Get job status and results."""
-    job_path = get_job_path(job_id)
-
-    if not job_path.exists():
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    metadata = json.loads(job_path.read_text())
-    return JobResult(**metadata)
+@app.get("/products/{product_id}")
+async def get_product(product_id: str):
+    return _product_summary(_product_path(product_id))
 
 
-@app.get("/jobs")
-async def list_jobs():
-    """List all jobs."""
-    jobs_dir = get_jobs_dir()
-    jobs = []
-
-    for job_file in sorted(jobs_dir.glob("*.json"), reverse=True):
-        metadata = json.loads(job_file.read_text())
-        jobs.append(metadata)
-
-    return {"jobs": jobs, "total": len(jobs)}
+@app.get("/products/{product_id}/files/{filename}")
+async def get_product_file(product_id: str, filename: str):
+    product_dir = _product_path(product_id)
+    safe_filename = _safe_name(filename)
+    file_path = product_dir / safe_filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path)
 
 
-if __name__ == "__main__":
-    import uvicorn
+@app.put("/products/{product_id}/listing")
+async def update_listing(product_id: str, update: ListingUpdate):
+    product_dir = _product_path(product_id)
+    current = _listing_for(product_dir) or {}
+    images = current.get("image_paths") or [str(product_dir / name) for name in _list_images(product_dir)]
+    cover_image = update.cover_image or current.get("cover_image") or (images[0] if images else None)
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    listing = {
+        "product_id": product_dir.name,
+        "title": update.title,
+        "description": update.description,
+        "price": update.price,
+        "currency": update.currency,
+        "category": update.category,
+        "condition": update.condition,
+        "attributes": update.attributes,
+        "image_paths": images,
+        "cover_image": cover_image,
+    }
+    _write_json(product_dir / "listing_plan.json", listing)
+    _write_json(
+        product_dir / "review_status.json",
+        {"status": "awaiting_review", "updated_at": datetime.utcnow().isoformat()},
+    )
+    return _product_summary(product_dir)
+
+
+@app.post("/products/{product_id}/approve")
+async def approve_product(product_id: str, username: str = Form("boss")):
+    product_dir = _product_path(product_id, include_ready=False)
+    if not (product_dir / "listing_plan.json").exists():
+        raise HTTPException(status_code=400, detail="Product has no listing plan to approve")
+
+    destination = ready_dir() / product_dir.name
+    if destination.exists():
+        destination = ready_dir() / f"{product_dir.name}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+    _write_json(
+        product_dir / "review_status.json",
+        {
+            "status": "ready_to_publish",
+            "approved_by": username,
+            "approved_at": datetime.utcnow().isoformat(),
+        },
+    )
+    shutil.move(str(product_dir), str(destination))
+    return _product_summary(destination)
+    

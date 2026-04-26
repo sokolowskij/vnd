@@ -26,7 +26,7 @@ COPY pyproject.toml .
 RUN pip install -e .
 
 # Create data directory for persistent state
-RUN mkdir -p /app/data/{products,jobs,browser_profiles,results}
+RUN mkdir -p /app/data/{products,ready_to_publish,auth,browser_profiles,results}
 
 # Expose API port
 EXPOSE 8000
