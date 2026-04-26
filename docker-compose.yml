@@ -10,7 +10,7 @@ services:
     environment:
       # LM Studio Configuration (runs on host machine)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-local-model}
-      - OPENAI_MODEL=${OPENAI_MODEL:-model-identifier}
+      - OPENAI_MODEL=${OPENAI_MODEL:-google/gemma-4-e4b}
       - LOCAL_MODEL_API=${LOCAL_MODEL_API:-http://host.docker.internal:1234/v1}
       # Other settings
       - DEFAULT_CURRENCY=${DEFAULT_CURRENCY:-PLN}

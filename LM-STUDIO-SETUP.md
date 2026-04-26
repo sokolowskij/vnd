@@ -21,7 +21,7 @@ Your `.env` should already have the correct settings:
 ```env
 LOCAL_MODEL_API=http://localhost:1234/v1
 OPENAI_API_KEY=local-model
-OPENAI_MODEL=model-identifier
+OPENAI_MODEL=google/gemma-4-e4b
 ```
 
 ### 3. Start LM Studio
@@ -147,7 +147,7 @@ There are two approaches:
    ```env
    LOCAL_MODEL_API=http://localhost:1234/v1
    OPENAI_API_KEY=local-model
-   OPENAI_MODEL=model-identifier
+   OPENAI_MODEL=google/gemma-4-e4b
    ```
 
 8. **Restart Docker services:**
@@ -197,7 +197,7 @@ There are two approaches:
    ```env
    LOCAL_MODEL_API=http://203.0.113.45:1234/v1
    OPENAI_API_KEY=local-model
-   OPENAI_MODEL=model-identifier
+   OPENAI_MODEL=google/gemma-4-e4b
    ```
 
 5. **Restart Docker:**
@@ -336,7 +336,7 @@ A: Yes! Just change `LOCAL_MODEL_API=http://localhost:11434/v1` and install Olla
 A: Just add your API key to .env:
 ```env
 OPENAI_API_KEY=sk-your-key
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=google/gemma-4-e4b
 ```
 
 **Q: Can I run multiple models simultaneously?**

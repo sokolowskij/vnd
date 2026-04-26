@@ -118,7 +118,7 @@ Set these in `.env` for customization:
 ```env
 # OpenAI Configuration
 OPENAI_API_KEY=sk-...              # Your API key
-OPENAI_MODEL=gpt-4o-mini           # Model to use
+OPENAI_MODEL=google/gemma-4-e4b           # Model to use
 
 # Behavior
 POST_MODE=dry_run                  # or 'publish'

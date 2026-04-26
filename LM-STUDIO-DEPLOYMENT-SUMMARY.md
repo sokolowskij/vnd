@@ -94,7 +94,7 @@ LOCAL_MODEL_API=http://YOUR_IP_HERE:1234/v1
 # Using local LM Studio - no API key needed!
 LOCAL_MODEL_API=http://localhost:1234/v1
 OPENAI_API_KEY=local-model
-OPENAI_MODEL=model-identifier
+OPENAI_MODEL=google/gemma-4-e4b
 
 # Other settings
 POST_MODE=dry_run
@@ -263,7 +263,7 @@ If you want to upgrade:
 ```bash
 # Switch to OpenAI (just change .env)
 OPENAI_API_KEY=sk-your-key
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=google/gemma-4-e4b
 ```
 
 ---

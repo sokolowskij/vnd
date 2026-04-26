@@ -203,7 +203,7 @@ Verify/update:
 ```env
 LOCAL_MODEL_API=http://localhost:1234/v1
 OPENAI_API_KEY=local-model
-OPENAI_MODEL=model-identifier
+OPENAI_MODEL=google/gemma-4-e4b
 ```
 
 - [ ] .env file exists at `/opt/agentic-seller/.env`

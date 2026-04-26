@@ -53,7 +53,7 @@ Fill `OPENAI_API_KEY`.
    ```env
    LOCAL_MODEL_API=http://localhost:1234/v1
    OPENAI_API_KEY=lm-studio
-   OPENAI_MODEL=local-model  # Or the specific name shown in LM Studio
+   OPENAI_MODEL=google/gemma-4-e4b  # Or the specific name shown in LM Studio
    ```
 
 3. Run in dry-run (safe):

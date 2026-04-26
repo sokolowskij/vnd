@@ -22,7 +22,7 @@ WHAT'S IN .env.example:
 # LM Studio Configuration (Local Model - No OpenAI API Key Needed)
 LOCAL_MODEL_API=http://localhost:1234/v1
 OPENAI_API_KEY=local-model
-OPENAI_MODEL=model-identifier
+OPENAI_MODEL=google/gemma-4-e4b
 
 (Rest of settings already configured)
 
@@ -196,11 +196,11 @@ ENVIRONMENT VARIABLE QUICK REFERENCE:
 For LM Studio (already set in .env.example):
   LOCAL_MODEL_API=http://localhost:1234/v1
   OPENAI_API_KEY=local-model
-  OPENAI_MODEL=model-identifier
+  OPENAI_MODEL=google/gemma-4-e4b
 
 For OpenAI (if you want to switch later):
   OPENAI_API_KEY=sk-your-api-key
-  OPENAI_MODEL=gpt-4o-mini
+  OPENAI_MODEL=google/gemma-4-e4b
 
 Other settings:
   POST_MODE=dry_run          # Or 'publish' for real posting

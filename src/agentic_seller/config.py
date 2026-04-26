@@ -29,7 +29,7 @@ def load_settings() -> Settings:
     load_dotenv()
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        openai_model=os.getenv("OPENAI_MODEL", "google/gemma-4-e4b"),
         default_currency=os.getenv("DEFAULT_CURRENCY", "PLN"),
         post_mode=os.getenv("POST_MODE", "dry_run"),
         headless=_as_bool("HEADLESS", False),
