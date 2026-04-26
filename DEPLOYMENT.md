@@ -102,7 +102,7 @@ Key environment variables in `.env`:
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `OPENAI_API_KEY` | Your OpenAI API key | `sk-...` |
-| `OPENAI_MODEL` | Model to use | `gpt-4o-mini` |
+| `OPENAI_MODEL` | Model to use | `google/gemma-4-e4b` |
 | `POST_MODE` | Publishing mode | `dry_run` or `publish` |
 | `HEADLESS` | Run browser headless | `true` |
 | `ENABLE_OLX` | Enable OLX marketplace | `true` |
