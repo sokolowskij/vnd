@@ -32,3 +32,10 @@ dist/
 
 # Docker/local runtime
 .streamlit/
+
+# Terraform local state and secrets
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
