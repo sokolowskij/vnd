@@ -115,18 +115,80 @@ def show_thumbnails(product: dict, max_images: int = 8) -> None:
                 st.image(BytesIO(content), caption=image_name, use_container_width=True)
 
 
-def product_table(products: list[dict]) -> None:
+def show_preview_image(product: dict) -> None:
+    images = product.get("images", [])
+    if not images:
+        st.caption("No preview")
+        return
+
+    image_name = images[0]
+    try:
+        content = api_bytes(f"/products/{product['product_id']}/files/{image_name}")
+    except requests.exceptions.RequestException:
+        st.caption("Preview unavailable")
+    else:
+        st.image(BytesIO(content), caption=image_name, use_container_width=True)
+
+
+def format_price(product: dict) -> str:
+    price = product.get("price")
+    if not isinstance(price, (int, float)):
+        return "-"
+    currency = (product.get("listing") or {}).get("currency", "PLN")
+    return f"{price:.0f} {currency}"
+
+
+def show_product_details(product: dict, key_prefix: str) -> None:
+    listing = product.get("listing") or {}
+
+    meta_cols = st.columns(4)
+    meta_cols[0].write(f"Status: **{product_badge(product['status'])}**")
+    meta_cols[1].write(f"Category: **{product.get('category') or '-'}**")
+    meta_cols[2].write(f"Price: **{format_price(product)}**")
+    meta_cols[3].write(f"Added by: **{product.get('added_by') or '-'}**")
+
+    if product.get("approved_by"):
+        st.caption(f"Approved by {product['approved_by']}")
+
+    description = listing.get("description", "")
+    if description:
+        st.text_area(
+            "Description",
+            value=description,
+            height=180,
+            disabled=True,
+            key=f"{key_prefix}_description",
+        )
+    else:
+        st.info("No generated description yet.")
+
+    show_thumbnails(product, max_images=8)
+
+
+def product_table(products: list[dict], key_prefix: str) -> None:
     if not products:
         st.info("No items yet.")
         return
 
     for product in products:
-        cols = st.columns([3, 2, 2, 2])
-        cols[0].write(f"**{product['title']}**")
-        cols[1].write(product_badge(product["status"]))
-        cols[2].write(product.get("category") or "-")
-        price = product.get("price")
-        cols[3].write(f"{price:.0f} PLN" if isinstance(price, (int, float)) else "-")
+        st.divider()
+        cols = st.columns([1, 3])
+        with cols[0]:
+            show_preview_image(product)
+        with cols[1]:
+            st.write(f"**{product['title']}**")
+            st.caption(
+                " | ".join(
+                    [
+                        product_badge(product["status"]),
+                        f"Added by: {product.get('added_by') or '-'}",
+                        product.get("category") or "No category",
+                        format_price(product),
+                    ]
+                )
+            )
+            with st.expander("Open product details"):
+                show_product_details(product, f"{key_prefix}_{product['product_id']}")
 
 
 def upload_page() -> None:
@@ -161,7 +223,11 @@ def upload_page() -> None:
             try:
                 result = api_post(
                     "/uploads/products",
-                    data={"product_name": product_name, "notes": notes},
+                    data={
+                        "product_name": product_name,
+                        "notes": notes,
+                        "added_by": current_user()["username"],
+                    },
                     files=multipart_files,
                 )
             except requests.exceptions.RequestException as exc:
@@ -188,9 +254,9 @@ def items_page() -> None:
 
     tab_pending, tab_ready = st.tabs(["In Review", "Ready"])
     with tab_pending:
-        product_table(pending)
+        product_table(pending, "pending")
     with tab_ready:
-        product_table(ready)
+        product_table(ready, "ready")
 
 
 def review_page() -> None:
@@ -228,6 +294,7 @@ def review_page() -> None:
 
     with right:
         st.write(f"Status: **{product_badge(product['status'])}**")
+        st.write(f"Added by: **{product.get('added_by') or '-'}**")
         if not listing:
             st.warning("No generated listing yet. Run the local generator, then sync or refresh this item.")
 

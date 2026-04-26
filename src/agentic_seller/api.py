@@ -162,9 +162,21 @@ def _listing_for(product_dir: Path) -> dict[str, Any] | None:
     return _read_json(listing_path, None)
 
 
+def _status_for(product_dir: Path) -> dict[str, Any]:
+    return _read_json(product_dir / "review_status.json", {})
+
+
+def _write_status(product_dir: Path, updates: dict[str, Any]) -> None:
+    status = _status_for(product_dir)
+    status.update(updates)
+    status["updated_at"] = datetime.utcnow().isoformat()
+    _write_json(product_dir / "review_status.json", status)
+
+
 def _product_summary(product_dir: Path) -> dict[str, Any]:
     listing = _listing_for(product_dir)
     status = _product_status(product_dir)
+    status_meta = _status_for(product_dir)
     fallback_title = product_dir.name
     return {
         "product_id": product_dir.name,
@@ -177,6 +189,10 @@ def _product_summary(product_dir: Path) -> dict[str, Any]:
         "price": (listing or {}).get("price"),
         "category": (listing or {}).get("category"),
         "condition": (listing or {}).get("condition"),
+        "added_by": status_meta.get("added_by"),
+        "uploaded_at": status_meta.get("uploaded_at"),
+        "approved_by": status_meta.get("approved_by"),
+        "approved_at": status_meta.get("approved_at"),
     }
 
 
@@ -239,6 +255,7 @@ async def create_user(request: UserCreateRequest):
 async def upload_product(
     product_name: str = Form(...),
     notes: str = Form(""),
+    added_by: str = Form("unknown"),
     files: list[UploadFile] = File(...),
 ):
     if not files:
@@ -263,9 +280,13 @@ async def upload_product(
         (product_dir / "notes.txt").write_text(notes.strip(), encoding="utf-8")
         saved_files.append("notes.txt")
 
-    _write_json(
-        product_dir / "review_status.json",
-        {"status": "awaiting_generation", "updated_at": datetime.utcnow().isoformat()},
+    _write_status(
+        product_dir,
+        {
+            "status": "awaiting_generation",
+            "added_by": _safe_name(added_by) if added_by.strip() else "unknown",
+            "uploaded_at": datetime.utcnow().isoformat(),
+        },
     )
     return UploadResponse(product_id=product_id, product_dir=str(product_dir), saved_files=saved_files)
 
@@ -319,10 +340,7 @@ async def update_listing(product_id: str, update: ListingUpdate):
         "cover_image": cover_image,
     }
     _write_json(product_dir / "listing_plan.json", listing)
-    _write_json(
-        product_dir / "review_status.json",
-        {"status": "awaiting_review", "updated_at": datetime.utcnow().isoformat()},
-    )
+    _write_status(product_dir, {"status": "awaiting_review"})
     return _product_summary(product_dir)
 
 
@@ -336,8 +354,8 @@ async def approve_product(product_id: str, username: str = Form("boss")):
     if destination.exists():
         destination = ready_dir() / f"{product_dir.name}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
-    _write_json(
-        product_dir / "review_status.json",
+    _write_status(
+        product_dir,
         {
             "status": "ready_to_publish",
             "approved_by": username,
