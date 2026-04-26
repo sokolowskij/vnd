@@ -5,13 +5,15 @@
 # Use REMOVE_CONTAINERS=1 to run docker compose down while still keeping volumes.
 #
 # Useful overrides:
-#   AGENTIC_SELLER_DIR=/opt/agentic-seller
+#   AGENTIC_SELLER_DIR=/opt/vnd
 #   REMOVE_CONTAINERS=1
 #   USE_PROD_COMPOSE=1
 
 set -euo pipefail
 
-DEPLOY_DIR="${AGENTIC_SELLER_DIR:-/opt/agentic-seller}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEPLOY_DIR="${AGENTIC_SELLER_DIR:-$DEFAULT_DEPLOY_DIR}"
 REMOVE_CONTAINERS="${REMOVE_CONTAINERS:-0}"
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 

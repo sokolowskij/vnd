@@ -2,18 +2,20 @@
 # Start the AWS Agentic Seller stack.
 #
 # Default behavior:
-# - starts backend and frontend from /opt/agentic-seller
+# - starts backend and frontend from the repo root that contains this scripts/ directory
 # - keeps existing Docker volumes/state
 # - does not rebuild unless BUILD=1 is supplied
 #
 # Useful overrides:
-#   AGENTIC_SELLER_DIR=/opt/agentic-seller
+#   AGENTIC_SELLER_DIR=/opt/vnd
 #   BUILD=1
 #   USE_PROD_COMPOSE=1
 
 set -euo pipefail
 
-DEPLOY_DIR="${AGENTIC_SELLER_DIR:-/opt/agentic-seller}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEPLOY_DIR="${AGENTIC_SELLER_DIR:-$DEFAULT_DEPLOY_DIR}"
 BUILD="${BUILD:-0}"
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 

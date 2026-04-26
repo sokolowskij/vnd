@@ -2,19 +2,21 @@
 # Reload only the AWS Streamlit frontend.
 #
 # Default behavior:
-# - runs from /opt/agentic-seller
+# - runs from the repo root that contains this scripts/ directory
 # - pulls the latest git changes with --ff-only
 # - rebuilds and recreates only the frontend container
 # - keeps backend and Docker volumes untouched
 #
 # Useful overrides:
-#   AGENTIC_SELLER_DIR=/opt/agentic-seller
+#   AGENTIC_SELLER_DIR=/opt/vnd
 #   PULL_LATEST=0
 #   USE_PROD_COMPOSE=1
 
 set -euo pipefail
 
-DEPLOY_DIR="${AGENTIC_SELLER_DIR:-/opt/agentic-seller}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEPLOY_DIR="${AGENTIC_SELLER_DIR:-$DEFAULT_DEPLOY_DIR}"
 PULL_LATEST="${PULL_LATEST:-1}"
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 
