@@ -533,32 +533,6 @@ def _send_smtp_message(message: EmailMessage) -> None:
         smtp.send_message(message)
 
 
-def _send_test_email() -> dict[str, Any]:
-    if not _backup_configured():
-        raise RuntimeError("Backup email is not configured")
-
-    sent_at = datetime.utcnow()
-    message = EmailMessage()
-    message["Subject"] = "Agentic Seller email test"
-    message["From"] = SMTP_FROM_EMAIL
-    message["To"] = ADMIN_BACKUP_EMAIL
-    message.set_content(
-        "This is a test email from Agentic Seller.\n\n"
-        "If you received this, SMTP is configured correctly.\n"
-    )
-
-    _send_smtp_message(message)
-
-    result = {
-        "last_result": "test_sent",
-        "last_sent_at": sent_at.isoformat(),
-        "last_error_at": None,
-        "last_error": None,
-    }
-    _write_json(backup_status_path(), result)
-    return _backup_status()
-
-
 def _send_daily_backup_email() -> dict[str, Any]:
     if not _backup_configured():
         raise RuntimeError("Daily backup email is not configured")
@@ -815,15 +789,6 @@ async def run_backup_email(_: dict[str, str] = Depends(boss_user)):
     except Exception as exc:
         _record_backup_error(exc)
         raise HTTPException(status_code=400, detail=f"Backup email failed: {exc}") from exc
-
-
-@app.post("/admin/backup/test")
-async def run_backup_test_email(_: dict[str, str] = Depends(boss_user)):
-    try:
-        return await asyncio.to_thread(_send_test_email)
-    except Exception as exc:
-        _record_backup_error(exc)
-        raise HTTPException(status_code=400, detail=f"Test email failed: {exc}") from exc
 
 
 @app.post("/products/{product_id}/files/rotate")

@@ -679,26 +679,14 @@ def users_page() -> None:
     if backup.get("last_error"):
         st.warning(f"Last backup error: {backup['last_error']}")
 
-    test_col, backup_col = st.columns(2)
-    with test_col:
-        if st.button("Send test email", disabled=not backup.get("configured")):
-            try:
-                result = api_post("/admin/backup/test")
-            except requests.exceptions.RequestException as exc:
-                st.error(f"Test email failed: {api_error_message(exc)}")
-            else:
-                st.success(f"Test email sent to {result.get('admin_email')}.")
-                st.rerun()
-
-    with backup_col:
-        if st.button("Send backup email now", disabled=not backup.get("configured")):
-            try:
-                result = api_post("/admin/backup/run")
-            except requests.exceptions.RequestException as exc:
-                st.error(f"Backup failed: {api_error_message(exc)}")
-            else:
-                st.success(f"Backup sent to {result.get('admin_email')}.")
-                st.rerun()
+    if st.button("Send backup email now", disabled=not backup.get("configured")):
+        try:
+            result = api_post("/admin/backup/run")
+        except requests.exceptions.RequestException as exc:
+            st.error(f"Backup failed: {api_error_message(exc)}")
+        else:
+            st.success(f"Backup sent to {result.get('admin_email')}.")
+            st.rerun()
 
 
 restore_session_from_cookie()
