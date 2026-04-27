@@ -19,6 +19,7 @@ services:
       - ENABLE_OLX=${ENABLE_OLX:-true}
       - ENABLE_FACEBOOK=${ENABLE_FACEBOOK:-true}
       - USER_DATA_DIR=/app/data/browser_profiles
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-30}
     volumes:
       # Persistent volume for agent state, browser profiles, and results
       - agentic_data:/app/data
@@ -48,6 +49,8 @@ services:
       - STREAMLIT_SERVER_ADDRESS=0.0.0.0
       - STREAMLIT_SERVER_HEADLESS=true
       - STREAMLIT_LOGGER_LEVEL=warning
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-30}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
     depends_on:
       backend:
         condition: service_healthy

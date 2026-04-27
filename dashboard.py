@@ -10,40 +10,59 @@ from urllib.parse import quote
 
 import requests
 import streamlit as st
+from streamlit.components.v1 import html
 
 st.set_page_config(page_title="Agentic Seller", layout="wide")
 
 API_URL = os.getenv("API_URL", "http://backend:8000")
 SHOP_OPTIONS = ["", "KC", "FW", "KEN", "MAG"]
 PACKAGE_SIZE_OPTIONS = ["small", "medium", "large"]
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "agentic_seller_session")
+SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
+SESSION_MAX_AGE_SECONDS = SESSION_TTL_DAYS * 24 * 60 * 60
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def auth_request_kwargs(kwargs: dict) -> dict:
+    headers = dict(kwargs.pop("headers", {}) or {})
+    token = st.session_state.get("session_token")
+    if token:
+        headers.setdefault("Authorization", f"Bearer {token}")
+    if headers:
+        kwargs["headers"] = headers
+    return kwargs
 
 
 def api_get(path: str, **kwargs) -> dict:
+    kwargs = auth_request_kwargs(kwargs)
     response = requests.get(f"{API_URL}{path}", timeout=15, **kwargs)
     response.raise_for_status()
     return response.json()
 
 
 def api_post(path: str, **kwargs) -> dict:
+    kwargs = auth_request_kwargs(kwargs)
     response = requests.post(f"{API_URL}{path}", timeout=60, **kwargs)
     response.raise_for_status()
     return response.json()
 
 
 def api_put(path: str, **kwargs) -> dict:
+    kwargs = auth_request_kwargs(kwargs)
     response = requests.put(f"{API_URL}{path}", timeout=30, **kwargs)
     response.raise_for_status()
     return response.json()
 
 
 def api_delete(path: str, **kwargs) -> dict:
+    kwargs = auth_request_kwargs(kwargs)
     response = requests.delete(f"{API_URL}{path}", timeout=30, **kwargs)
     response.raise_for_status()
     return response.json()
 
 
 def api_bytes(path: str) -> bytes:
-    response = requests.get(f"{API_URL}{path}", timeout=20)
+    response = requests.get(f"{API_URL}{path}", timeout=20, **auth_request_kwargs({}))
     response.raise_for_status()
     return response.content
 
@@ -67,9 +86,84 @@ def current_user() -> dict | None:
     return st.session_state.get("user")
 
 
-def logout() -> None:
-    st.session_state.pop("user", None)
+def browser_session_cookie() -> str | None:
+    context = getattr(st, "context", None)
+    cookies = getattr(context, "cookies", {}) if context is not None else {}
+    token = cookies.get(SESSION_COOKIE_NAME) if hasattr(cookies, "get") else None
+    return token or None
+
+
+def write_session_cookie(token: str) -> None:
+    secure = "; Secure" if SESSION_COOKIE_SECURE else ""
+    html(
+        f"""
+        <script>
+        const cookieName = {json.dumps(SESSION_COOKIE_NAME)};
+        const cookieValue = encodeURIComponent({json.dumps(token)});
+        document.cookie = `${{cookieName}}=${{cookieValue}}; Max-Age={SESSION_MAX_AGE_SECONDS}; Path=/; SameSite=Lax{secure}`;
+        window.parent.location.reload();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def clear_session_cookie(reload_page: bool = True) -> None:
+    reload_script = "window.parent.location.reload();" if reload_page else ""
+    secure = "; Secure" if SESSION_COOKIE_SECURE else ""
+    html(
+        f"""
+        <script>
+        const cookieName = {json.dumps(SESSION_COOKIE_NAME)};
+        document.cookie = `${{cookieName}}=; Max-Age=0; Path=/; SameSite=Lax{secure}`;
+        {reload_script}
+        </script>
+        """,
+        height=0,
+    )
+
+
+def user_from_auth_payload(payload: dict) -> dict:
+    return {"username": payload["username"], "role": payload.get("role", "user")}
+
+
+def start_authenticated_session(payload: dict) -> None:
+    token = payload.get("session_token")
+    st.session_state["user"] = user_from_auth_payload(payload)
+    if token:
+        st.session_state["session_token"] = token
+        write_session_cookie(token)
+        st.stop()
     st.rerun()
+
+
+def restore_session_from_cookie() -> None:
+    if current_user() is not None:
+        return
+    token = browser_session_cookie()
+    if not token:
+        return
+
+    st.session_state["session_token"] = token
+    try:
+        user = api_get("/auth/session")
+    except requests.exceptions.RequestException:
+        st.session_state.pop("session_token", None)
+        st.session_state.pop("user", None)
+        clear_session_cookie(reload_page=False)
+    else:
+        st.session_state["user"] = user_from_auth_payload(user)
+
+
+def logout() -> None:
+    try:
+        api_post("/auth/logout")
+    except requests.exceptions.RequestException:
+        pass
+    st.session_state.pop("user", None)
+    st.session_state.pop("session_token", None)
+    clear_session_cookie()
+    st.stop()
 
 
 def show_auth() -> None:
@@ -94,8 +188,7 @@ def show_auth() -> None:
             except requests.exceptions.RequestException as exc:
                 st.error(f"Setup failed: {exc}")
             else:
-                st.session_state["user"] = user
-                st.rerun()
+                start_authenticated_session(user)
         st.stop()
 
     st.subheader("Sign In")
@@ -109,8 +202,7 @@ def show_auth() -> None:
         except requests.exceptions.RequestException:
             st.error("Invalid username or password.")
         else:
-            st.session_state["user"] = user
-            st.rerun()
+            start_authenticated_session(user)
     st.stop()
 
 
@@ -595,6 +687,8 @@ def users_page() -> None:
             st.success(f"Backup sent to {result.get('admin_email')}.")
             st.rerun()
 
+
+restore_session_from_cookie()
 
 if current_user() is None:
     show_auth()

@@ -22,6 +22,7 @@ services:
       # Production settings
       - HEADLESS=true
       - POST_MODE=publish  # Use real posting in production
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-30}
       # Keep others from .env
 
   frontend:
@@ -43,6 +44,8 @@ services:
     environment:
       - STREAMLIT_SERVER_HEADLESS=true
       - STREAMLIT_LOGGER_LEVEL=error
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-30}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
 
 # Example AWS Security:
 # 1. Use Security Group with:

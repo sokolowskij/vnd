@@ -19,7 +19,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
@@ -37,6 +37,7 @@ READY_RETENTION_DAYS = int(os.getenv("READY_RETENTION_DAYS", "30"))
 RETENTION_CHECK_HOURS = int(os.getenv("RETENTION_CHECK_HOURS", "24"))
 DAILY_BACKUP_ENABLED = os.getenv("DAILY_BACKUP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 DAILY_BACKUP_HOUR_UTC = int(os.getenv("DAILY_BACKUP_HOUR_UTC", "3"))
+SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 ADMIN_BACKUP_EMAIL = os.getenv("ADMIN_BACKUP_EMAIL", "").strip()
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -121,6 +122,10 @@ def users_path() -> Path:
     return auth_dir() / "users.json"
 
 
+def sessions_path() -> Path:
+    return auth_dir() / "sessions.json"
+
+
 def _safe_name(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "", value).strip().strip(".")
     cleaned = re.sub(r"\s+", " ", cleaned)
@@ -158,6 +163,94 @@ def _load_users() -> dict[str, dict[str, str]]:
 
 def _save_users(users: dict[str, dict[str, str]]) -> None:
     _write_json(users_path(), users)
+
+
+def _load_sessions() -> dict[str, dict[str, str]]:
+    sessions = _read_json(sessions_path(), {})
+    return sessions if isinstance(sessions, dict) else {}
+
+
+def _save_sessions(sessions: dict[str, dict[str, str]]) -> None:
+    _write_json(sessions_path(), sessions)
+
+
+def _session_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _new_session(username: str, role: str) -> dict[str, str]:
+    token = secrets.token_urlsafe(32)
+    now = datetime.utcnow()
+    expires_at = now + timedelta(days=SESSION_TTL_DAYS)
+    sessions = _load_sessions()
+    sessions[_session_hash(token)] = {
+        "username": username,
+        "role": role,
+        "created_at": now.isoformat(),
+        "last_seen_at": now.isoformat(),
+        "expires_at": expires_at.isoformat(),
+    }
+    _prune_sessions(sessions, now)
+    _save_sessions(sessions)
+    return {
+        "username": username,
+        "role": role,
+        "session_token": token,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+def _prune_sessions(sessions: dict[str, dict[str, str]], now: datetime | None = None) -> None:
+    now = now or datetime.utcnow()
+    expired = [
+        token_hash
+        for token_hash, session in sessions.items()
+        if (_parse_datetime(session.get("expires_at")) or now) <= now
+    ]
+    for token_hash in expired:
+        sessions.pop(token_hash, None)
+
+
+def _bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing session token")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    return token.strip()
+
+
+def _current_session(authorization: str | None = Header(default=None)) -> tuple[str, dict[str, str]]:
+    token = _bearer_token(authorization)
+    token_hash = _session_hash(token)
+    sessions = _load_sessions()
+    now = datetime.utcnow()
+    _prune_sessions(sessions, now)
+    session = sessions.get(token_hash)
+    if not session:
+        _save_sessions(sessions)
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    expires_at = _parse_datetime(session.get("expires_at"))
+    if not expires_at or expires_at <= now:
+        sessions.pop(token_hash, None)
+        _save_sessions(sessions)
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    session["last_seen_at"] = now.isoformat()
+    _save_sessions(sessions)
+    return token_hash, session
+
+
+def current_user(session_data: tuple[str, dict[str, str]] = Depends(_current_session)) -> dict[str, str]:
+    _, session = session_data
+    return {"username": session["username"], "role": session.get("role", "user")}
+
+
+def boss_user(user: dict[str, str] = Depends(current_user)) -> dict[str, str]:
+    if user.get("role") != "boss":
+        raise HTTPException(status_code=403, detail="Boss access required")
+    return user
 
 
 def _password_hash(password: str, salt: str | None = None) -> str:
@@ -528,7 +621,7 @@ async def setup_first_user(request: AuthRequest):
         "created_at": datetime.utcnow().isoformat(),
     }
     _save_users(users)
-    return {"username": username, "role": "boss"}
+    return _new_session(username, "boss")
 
 
 @app.post("/auth/login")
@@ -537,11 +630,25 @@ async def login(request: AuthRequest):
     user = users.get(request.username)
     if not user or not _verify_password(request.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    return {"username": request.username, "role": user.get("role", "user")}
+    return _new_session(request.username, user.get("role", "user"))
+
+
+@app.get("/auth/session")
+async def restore_session(user: dict[str, str] = Depends(current_user)):
+    return user
+
+
+@app.post("/auth/logout")
+async def logout(session_data: tuple[str, dict[str, str]] = Depends(_current_session)):
+    token_hash, _ = session_data
+    sessions = _load_sessions()
+    sessions.pop(token_hash, None)
+    _save_sessions(sessions)
+    return {"logged_out": True}
 
 
 @app.post("/auth/users")
-async def create_user(request: UserCreateRequest):
+async def create_user(request: UserCreateRequest, _: dict[str, str] = Depends(boss_user)):
     users = _load_users()
     username = _safe_name(request.username)
     if username in users:
@@ -567,6 +674,7 @@ async def upload_product(
     package_size: str = Form("medium"),
     actual_store_shelf_price: float | None = Form(None),
     files: list[UploadFile] = File(...),
+    user: dict[str, str] = Depends(current_user),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one file")
@@ -594,7 +702,7 @@ async def upload_product(
         product_dir,
         {
             "status": "awaiting_generation",
-            "added_by": _safe_name(added_by) if added_by.strip() else "unknown",
+            "added_by": user["username"] or (_safe_name(added_by) if added_by.strip() else "unknown"),
             "uploaded_at": datetime.utcnow().isoformat(),
             **_metadata_updates(shop, package_size, actual_store_shelf_price),
         },
@@ -603,7 +711,7 @@ async def upload_product(
 
 
 @app.get("/products")
-async def list_products(status: str | None = None):
+async def list_products(status: str | None = None, _: dict[str, str] = Depends(current_user)):
     products = [_product_summary(path) for path in sorted(_iter_product_dirs(), key=lambda p: p.name.lower())]
     if status:
         products = [product for product in products if product["status"] == status]
@@ -615,32 +723,32 @@ async def list_products(status: str | None = None):
 
 
 @app.get("/products/{product_id}")
-async def get_product(product_id: str):
+async def get_product(product_id: str, _: dict[str, str] = Depends(current_user)):
     return _product_summary(_product_path(product_id))
 
 
 @app.get("/admin/data/export")
-async def export_all_data():
+async def export_all_data(_: dict[str, str] = Depends(boss_user)):
     return _zip_paths([products_dir(), ready_dir()], "agentic-seller-data")
 
 
 @app.get("/admin/retention")
-async def retention_status():
+async def retention_status(_: dict[str, str] = Depends(boss_user)):
     return _retention_report(delete=False)
 
 
 @app.post("/admin/retention/run")
-async def run_retention_cleanup():
+async def run_retention_cleanup(_: dict[str, str] = Depends(boss_user)):
     return _retention_report(delete=True)
 
 
 @app.get("/admin/backup")
-async def backup_status():
+async def backup_status(_: dict[str, str] = Depends(boss_user)):
     return _backup_status()
 
 
 @app.post("/admin/backup/run")
-async def run_backup_email():
+async def run_backup_email(_: dict[str, str] = Depends(boss_user)):
     try:
         return await asyncio.to_thread(_send_daily_backup_email)
     except Exception as exc:
@@ -649,19 +757,28 @@ async def run_backup_email():
 
 
 @app.get("/products/{product_id}/files/{filename}")
-async def get_product_file(product_id: str, filename: str):
+async def get_product_file(product_id: str, filename: str, _: dict[str, str] = Depends(current_user)):
     file_path = _product_file_path(product_id, filename)
     return FileResponse(file_path)
 
 
 @app.post("/products/{product_id}/files/{filename}/rotate")
-async def rotate_product_image(product_id: str, filename: str, request: ImageRotateRequest):
+async def rotate_product_image(
+    product_id: str,
+    filename: str,
+    request: ImageRotateRequest,
+    _: dict[str, str] = Depends(boss_user),
+):
     file_path = _product_file_path(product_id, filename, require_image=True)
     return _rotate_image_file(file_path, request.degrees)
 
 
 @app.post("/products/{product_id}/files/rotate")
-async def rotate_product_image_by_request(product_id: str, request: ImageRotateRequest):
+async def rotate_product_image_by_request(
+    product_id: str,
+    request: ImageRotateRequest,
+    _: dict[str, str] = Depends(boss_user),
+):
     if not request.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
     file_path = _product_file_path(product_id, request.filename, require_image=True)
@@ -669,7 +786,11 @@ async def rotate_product_image_by_request(product_id: str, request: ImageRotateR
 
 
 @app.put("/products/{product_id}/metadata")
-async def update_product_metadata(product_id: str, update: ProductMetadataUpdate):
+async def update_product_metadata(
+    product_id: str,
+    update: ProductMetadataUpdate,
+    _: dict[str, str] = Depends(boss_user),
+):
     product_dir = _product_path(product_id)
     _write_status(
         product_dir,
@@ -679,13 +800,13 @@ async def update_product_metadata(product_id: str, update: ProductMetadataUpdate
 
 
 @app.get("/products/{product_id}/download")
-async def download_product(product_id: str):
+async def download_product(product_id: str, _: dict[str, str] = Depends(boss_user)):
     product_dir = _product_path(product_id)
     return _zip_paths([product_dir], product_dir.name)
 
 
 @app.delete("/products/{product_id}")
-async def delete_product(product_id: str):
+async def delete_product(product_id: str, _: dict[str, str] = Depends(boss_user)):
     product_dir = _product_path(product_id)
     summary = _product_summary(product_dir)
     shutil.rmtree(product_dir)
@@ -693,7 +814,7 @@ async def delete_product(product_id: str):
 
 
 @app.put("/products/{product_id}/listing")
-async def update_listing(product_id: str, update: ListingUpdate):
+async def update_listing(product_id: str, update: ListingUpdate, _: dict[str, str] = Depends(boss_user)):
     product_dir = _product_path(product_id)
     current = _listing_for(product_dir) or {}
     images = current.get("image_paths") or [str(product_dir / name) for name in _list_images(product_dir)]
@@ -717,7 +838,11 @@ async def update_listing(product_id: str, update: ListingUpdate):
 
 
 @app.post("/products/{product_id}/approve")
-async def approve_product(product_id: str, username: str = Form("boss")):
+async def approve_product(
+    product_id: str,
+    username: str = Form("boss"),
+    user: dict[str, str] = Depends(boss_user),
+):
     product_dir = _product_path(product_id, include_ready=False)
     if not (product_dir / "listing_plan.json").exists():
         raise HTTPException(status_code=400, detail="Product has no listing plan to approve")
@@ -730,7 +855,7 @@ async def approve_product(product_id: str, username: str = Form("boss")):
         product_dir,
         {
             "status": "ready_to_publish",
-            "approved_by": username,
+            "approved_by": user["username"] or username,
             "approved_at": datetime.utcnow().isoformat(),
         },
     )
