@@ -88,6 +88,15 @@ run_in_backend_data_container() {
 
   echo "Host DataDir does not exist: $DATA_DIR"
   echo "Using backend Docker volume instead."
+  echo "Checking model endpoint: $model_api/models"
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -fsS "$model_api/models" >/dev/null; then
+      echo "Cannot reach model endpoint from AWS host."
+      echo "Keep the Windows SSH reverse tunnel open and make sure LM Studio server is running."
+      exit 1
+    fi
+  fi
+
   echo "Running Agentic Seller pipeline"
   echo "DataDir:      $container_data_dir"
   echo "Mode:         $MODE"
@@ -100,16 +109,24 @@ run_in_backend_data_container() {
   fi
 
   local cli_args=(
-    python -m agentic_seller.cli
+    python -u -m agentic_seller.cli
     --data-dir "$container_data_dir"
     --mode "$MODE"
     --marketplaces "${MARKETPLACES[@]}"
   )
 
+  if [[ "$RECALCULATE" != "1" ]]; then
+    if docker run --rm --volumes-from "$backend_container" "$backend_image" \
+      python -m agentic_seller.cli --help | grep -q -- "--use-cached-listings"; then
+      cli_args+=(--use-cached-listings)
+    fi
+  fi
+
   docker run --rm \
     --network host \
     --volumes-from "$backend_container" \
     -e LOCAL_MODEL_API="$model_api" \
+    -e PYTHONUNBUFFERED=1 \
     -e OPENAI_API_KEY="${OPENAI_API_KEY:-local-model}" \
     -e OPENAI_MODEL="${OPENAI_MODEL:-google/gemma-4-e4b}" \
     -e DEFAULT_CURRENCY="${DEFAULT_CURRENCY:-PLN}" \
@@ -245,4 +262,4 @@ if [[ "$RECALCULATE" != "1" ]]; then
   fi
 fi
 
-"$PYTHON" "${CLI_ARGS[@]}"
+PYTHONUNBUFFERED=1 "$PYTHON" -u "${CLI_ARGS[@]}"

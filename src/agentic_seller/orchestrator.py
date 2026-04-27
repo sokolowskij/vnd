@@ -7,6 +7,7 @@ from pathlib import Path
 from .analyzer import ListingAnalyzer
 from .config import Settings
 from .ingest import discover_products
+from .models import ListingPlan
 from .marketplaces import FacebookMarketplaceAdapter, OLXAdapter
 from .models import PostResult
 
@@ -15,13 +16,24 @@ def _write_json(path: Path, payload: dict | list) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def run_pipeline(data_dir: Path, settings: Settings, mode: str, selected_marketplaces: list[str]) -> None:
+def _load_listing(path: Path) -> ListingPlan:
+    return ListingPlan(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def run_pipeline(
+    data_dir: Path,
+    settings: Settings,
+    mode: str,
+    selected_marketplaces: list[str],
+    use_cached_listings: bool = False,
+) -> None:
     products = discover_products(data_dir)
     if not products:
-        print(f"No product folders found in: {data_dir}")
+        print(f"No product folders found in: {data_dir}", flush=True)
         return
 
     analyzer = ListingAnalyzer(settings)
+    print(f"Discovered {len(products)} product(s) in {data_dir}", flush=True)
     user_data_base = Path(settings.user_data_dir).resolve()
     user_data_base.mkdir(parents=True, exist_ok=True)
 
@@ -32,7 +44,7 @@ def run_pipeline(data_dir: Path, settings: Settings, mode: str, selected_marketp
 
     active = [name for name in selected_marketplaces if name in adapters]
     if not active:
-        print("No valid marketplaces selected.")
+        print("No valid marketplaces selected.", flush=True)
         return
 
     if mode == "publish":
@@ -44,10 +56,15 @@ def run_pipeline(data_dir: Path, settings: Settings, mode: str, selected_marketp
 
     with play_ctx as p:
         for product in products:
-            print(f"Processing: {product.product_id}")
-            listing = analyzer.analyze(product)
+            print(f"Processing: {product.product_id}", flush=True)
             listing_path = product.root_dir / "listing_plan.json"
-            _write_json(listing_path, listing.to_dict())
+            if use_cached_listings and listing_path.exists():
+                listing = _load_listing(listing_path)
+                print(f"  - using cached listing: {listing_path}", flush=True)
+            else:
+                listing = analyzer.analyze(product)
+                _write_json(listing_path, listing.to_dict())
+                print(f"  - wrote listing: {listing_path}", flush=True)
 
             results: list[PostResult] = []
             for name in active:
@@ -67,11 +84,13 @@ def run_pipeline(data_dir: Path, settings: Settings, mode: str, selected_marketp
                 try:
                     result = adapters[name].post(browser_context, listing, mode)
                     results.append(result)
-                    print(f"  - {name}: {'OK' if result.success else 'FAIL'} | {result.message}")
+                    print(f"  - {name}: {'OK' if result.success else 'FAIL'} | {result.message}", flush=True)
                 finally:
                     if browser_context:
                         browser_context.close()
 
             result_path = product.root_dir / "post_results.json"
             _write_json(result_path, [r.to_dict() for r in results])
+            print(f"  - wrote results: {result_path}", flush=True)
 
+    analyzer.print_usage_summary()

@@ -22,6 +22,11 @@ def parse_args() -> argparse.Namespace:
         default=["olx", "facebook", "ceneo"],
         help="Marketplaces to run: olx facebook ceneo",
     )
+    parser.add_argument(
+        "--use-cached-listings",
+        action="store_true",
+        help="Use existing listing_plan.json files when present instead of recalculating descriptions.",
+    )
     return parser.parse_args()
 
 
@@ -29,7 +34,13 @@ def main() -> None:
     args = parse_args()
     settings = load_settings()
     mode = args.mode or settings.post_mode
-    run_pipeline(args.data_dir, settings, mode=mode, selected_marketplaces=args.marketplaces)
+    run_pipeline(
+        args.data_dir,
+        settings,
+        mode=mode,
+        selected_marketplaces=args.marketplaces,
+        use_cached_listings=args.use_cached_listings,
+    )
 
 
 if __name__ == "__main__":

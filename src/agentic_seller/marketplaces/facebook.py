@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 from ..models import ListingPlan, PostResult
@@ -8,6 +10,70 @@ from .base import MarketplaceAdapter
 
 class FacebookMarketplaceAdapter(MarketplaceAdapter):
     name = "facebook"
+
+    def _first_fillable(self, page: Any, labels: list[str], timeout: int = 2500) -> Any | None:
+        candidates = []
+        for label in labels:
+            label_pattern = re.compile(re.escape(label), re.IGNORECASE)
+            candidates.extend(
+                [
+                    page.get_by_label(label, exact=False),
+                    page.get_by_placeholder(label, exact=False),
+                    page.get_by_role("textbox", name=label_pattern),
+                    page.locator(f"input[aria-label*='{label}'], textarea[aria-label*='{label}']"),
+                    page.locator(f"[contenteditable='true'][aria-label*='{label}']"),
+                    page.locator(f"label:has-text('{label}')").locator("..").locator(
+                        "input, textarea, [contenteditable='true']"
+                    ),
+                ]
+            )
+
+        for candidate in candidates:
+            field = candidate.first
+            try:
+                field.wait_for(state="visible", timeout=timeout)
+                return field
+            except Exception:
+                continue
+        return None
+
+    def _fill_field(self, page: Any, labels: list[str], value: str, field_name: str) -> bool:
+        field = self._first_fillable(page, labels)
+        if field is None:
+            print(f"  [WARN] Facebook {field_name} field was not found.")
+            return False
+
+        field.fill(value)
+        return True
+
+    def _absolute_existing_images(self, listing: ListingPlan) -> list[str]:
+        image_paths: list[str] = []
+        for image_path in listing.image_paths[:10]:
+            path = Path(image_path)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            if path.exists():
+                image_paths.append(str(path))
+            else:
+                print(f"  [WARN] Image not found, skipping: {path}")
+        return image_paths
+
+    def _upload_images(self, page: Any, listing: ListingPlan) -> bool:
+        image_paths = self._absolute_existing_images(listing)
+        if not image_paths:
+            print("  [WARN] No existing images found for Facebook upload.")
+            return False
+
+        file_input = page.locator("input[type='file'][accept*='image'], input[type='file']").first
+        try:
+            file_input.wait_for(state="attached", timeout=10000)
+            file_input.set_input_files(image_paths)
+            page.wait_for_timeout(2000)
+            print(f"  [OK] Uploaded {len(image_paths)} photo(s) to Facebook.")
+            return True
+        except Exception as exc:
+            print(f"  [WARN] Facebook photo upload failed: {exc}")
+            return False
 
     def post(self, context: Any, listing: ListingPlan, mode: str) -> PostResult:
         if mode == "dry_run":
@@ -28,6 +94,9 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
 
         page = context.new_page()
         try:
+            filled_steps: list[str] = []
+            missing_steps: list[str] = []
+
             # Using domcontentloaded instead of networkidle as FB is very "heavy"
             page.goto("https://www.facebook.com/marketplace/create/item", wait_until="domcontentloaded")
             
@@ -36,96 +105,86 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
                 print("  [ACTION REQUIRED] Please log in to Facebook. The agent will wait.")
                 page.wait_for_url("**/marketplace/create/item**", timeout=0)
 
-            # Look for "Tytuł" or "Title" labels (FB uses aria-labels heavily)
-            # Try Polish first, then English fallbacks
-            title_input = (
-                page.get_by_label("Tytuł", exact=False) 
-                or page.get_by_label("Title", exact=False)
-                or page.locator("label:has-text('Tytuł')").locator("..").locator("input")
-            )
+            page.wait_for_load_state("domcontentloaded")
 
-            if title_input.first.is_visible(timeout=10000):
-                title_input.first.fill(listing.title)
-                
-                # Fill others if possible
-                price_input = page.get_by_label("Cena", exact=False).or_(page.get_by_label("Price", exact=False))
-                if price_input.first.is_visible():
-                    price_input.first.fill(str(int(listing.price)))
+            if self._fill_field(page, ["Tytuł", "Title"], listing.title, "title"):
+                filled_steps.append("title")
+            else:
+                missing_steps.append("title")
 
-                desc_input = page.get_by_label("Opis", exact=False).or_(page.get_by_label("Description", exact=False))
-                if desc_input.first.is_visible():
-                    desc_input.first.fill(listing.description)
+            if self._fill_field(page, ["Cena", "Price"], str(int(listing.price)), "price"):
+                filled_steps.append("price")
+            else:
+                missing_steps.append("price")
 
-                # --- CATEGORY HANDLING ---
-                # Facebook Category selector is notoriously difficult to automate due to focus trapping.
-                # We will perform a best-effort fill, but wrap it in a try/except to ensure the REST of the form fills.
-                try:
-                    category_selector = page.locator("label:has-text('Kategoria')").or_(page.get_by_label("Kategoria", exact=False))
-                    if category_selector.first.is_visible(timeout=5000):
-                        category_selector.first.click()
-                        page.wait_for_timeout(1000)
-                        
-                        # Type only (avoiding Ctrl+A which as the user noted, selects the whole page sometimes)
-                        page.keyboard.type(listing.category, delay=100)
-                        page.wait_for_timeout(2000)
-                        
-                        # Try to click the specific option, but don't hang if it fails
-                        try:
-                            page.locator(f"div[role='listbox'] div[role='option']").first.click(timeout=3000)
-                        except:
-                            page.keyboard.press("Enter")
-                except Exception as e:
-                    print(f"  [DEBUG] Category automation skipped: {e}")
+            if self._fill_field(page, ["Opis", "Description"], listing.description, "description"):
+                filled_steps.append("description")
+            else:
+                missing_steps.append("description")
 
-                # --- CONDITION HANDLING ---
-                # Move condition AFTER category so that even if category fails, state is attempted.
-                try:
-                    condition_selector = page.locator("label:has-text('Stan')").or_(page.get_by_label("Stan", exact=False))
-                    if condition_selector.first.is_visible(timeout=5000):
-                        condition_selector.first.click()
-                        page.wait_for_timeout(1000)
-                        
-                        target_map = {
-                            "Nowy": "Nowy",
-                            "Jak nowy": "Używany - jak nowy",
-                            "Bardzo dobry": "Używany - bardzo dobry",
-                            "Dobry": "Używany - dobry",
-                            "Do renowacji": "Używany - dobry"
-                        }
-                        target_text = target_map.get(listing.condition, "Używany - bardzo dobry")
-                        
-                        try:
-                            # Try multiple ways to find the option
-                            option = page.locator(f"role=option >> text='{target_text}'").or_(page.locator(f"span:has-text('{target_text}')")).first
-                            option.click(timeout=3000)
-                        except:
-                            # Direct keyboard sequence as ultimate fallback
-                            if "jak nowy" in target_text.lower():
-                                page.keyboard.press("ArrowDown")
-                                page.keyboard.press("ArrowDown")
-                            elif "bardzo dobry" in target_text.lower():
-                                page.keyboard.press("ArrowDown")
-                                page.keyboard.press("ArrowDown")
-                                page.keyboard.press("ArrowDown")
-                            else:
-                                page.keyboard.press("ArrowDown")
-                            page.keyboard.press("Enter")
-                except Exception as e:
-                    print(f"  [DEBUG] Condition automation skipped: {e}")
+            if self._upload_images(page, listing):
+                filled_steps.append("photos")
+            else:
+                missing_steps.append("photos")
 
-                # Facebook often has multiple hidden file inputs. Using .first to avoid strict mode violation.
-                for img in listing.image_paths[:10]:
-                    page.locator("input[type='file']").first.set_input_files(img)
+            print("  [INFO] Facebook category is left for manual selection.")
+            missing_steps.append("category")
+
+            # --- CONDITION HANDLING ---
+            try:
+                condition_selector = page.locator("label:has-text('Stan')").or_(
+                    page.get_by_label("Stan", exact=False)
+                ).or_(page.get_by_label("Condition", exact=False))
+                if condition_selector.first.is_visible(timeout=5000):
+                    condition_selector.first.click()
+                    page.wait_for_timeout(1000)
+
+                    target_map = {
+                        "Nowy": "Nowy",
+                        "Jak nowy": "Używany - jak nowy",
+                        "Bardzo dobry": "Używany - bardzo dobry",
+                        "Dobry": "Używany - dobry",
+                        "Do renowacji": "Używany - dobry",
+                    }
+                    target_text = target_map.get(listing.condition, "Używany - bardzo dobry")
+
+                    try:
+                        option = page.locator(f"role=option >> text='{target_text}'").or_(
+                            page.locator(f"span:has-text('{target_text}')")
+                        ).first
+                        option.click(timeout=3000)
+                    except Exception:
+                        if "jak nowy" in target_text.lower():
+                            page.keyboard.press("ArrowDown")
+                            page.keyboard.press("ArrowDown")
+                        elif "bardzo dobry" in target_text.lower():
+                            page.keyboard.press("ArrowDown")
+                            page.keyboard.press("ArrowDown")
+                            page.keyboard.press("ArrowDown")
+                        else:
+                            page.keyboard.press("ArrowDown")
+                        page.keyboard.press("Enter")
+                    filled_steps.append("condition")
+            except Exception as e:
+                print(f"  [DEBUG] Condition automation skipped: {e}")
 
             print(f"  [WAITING] Facebook form prepared. Please review and click 'Publish' in the browser.")
+            if missing_steps:
+                print(f"  [WARN] Review these fields manually: {', '.join(missing_steps)}")
             print(f"  [WAITING] The agent will proceed once you close the page.")
             page.wait_for_event("close", timeout=0)
+
+            message = "Listing flow completed by human."
+            if missing_steps:
+                message += f" Manual review needed for: {', '.join(missing_steps)}."
+            if filled_steps:
+                message += f" Automated: {', '.join(filled_steps)}."
 
             return PostResult(
                 marketplace=self.name,
                 success=True,
                 mode=mode,
-                message="Listing flow completed by human.",
+                message=message,
                 url=page.url,
             )
         except Exception as exc:

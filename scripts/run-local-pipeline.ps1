@@ -4,10 +4,14 @@ Runs local listing generation and optional publishing.
 Examples:
   .\scripts\run-local-pipeline.ps1
   .\scripts\run-local-pipeline.ps1 -Mode dry_run -DataDir .\data\products
+  .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook
+  .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -Recalculate
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces olx,facebook -Yes
 
 Notes:
-  - dry_run generates listing_plan.json and post_results.json without submitting listings.
+  - By default, existing listing_plan.json files are reused as cached data.
+  - Use -Recalculate to regenerate listing_plan.json before posting.
+  - dry_run writes post_results.json without submitting listings.
   - publish opens/uses marketplace browser automation and may post real listings.
   - Configure .env first. For LM Studio, keep the local server running.
 #>
@@ -18,6 +22,7 @@ param(
     [ValidateSet("dry_run", "publish")]
     [string]$Mode = "dry_run",
     [string[]]$Marketplaces = @("olx", "facebook"),
+    [switch]$Recalculate,
     [switch]$Yes,
     [switch]$InstallBrowsers
 )
@@ -60,6 +65,7 @@ Write-Host "DataDir:      $ResolvedDataDir"
 Write-Host "Mode:         $Mode"
 Write-Host "Marketplaces: $($Marketplaces -join ', ')"
 Write-Host "UserDataDir:  $env:USER_DATA_DIR"
+Write-Host "Listings:     $(if ($Recalculate) { 'recalculate' } else { 'use cached when available' })"
 
 $CliArgs = @(
     "-m",
@@ -70,6 +76,10 @@ $CliArgs = @(
     $Mode,
     "--marketplaces"
 ) + $Marketplaces
+
+if (-not $Recalculate) {
+    $CliArgs += "--use-cached-listings"
+}
 
 & $Python @CliArgs
 

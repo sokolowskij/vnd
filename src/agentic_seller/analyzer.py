@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,13 @@ from .models import ListingPlan, ProductInput
 class ListingAnalyzer:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.usage_totals = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "requests": 0,
+        }
+        self.usage_available = False
         # In a real local copilot-integrated environment, we might use a local LLM endpoint
         # or a specific environment-provided token. For this request, I will simplify 
         # the analyzer to work with a generic local endpoint (like LM Studio or Ollama)
@@ -34,9 +42,46 @@ class ListingAnalyzer:
                 base_url=self.api_base if self.use_local_model else None,
             )
             if self.use_local_model:
-                print(f"  [MODEL] Using local OpenAI-compatible endpoint: {self.api_base}")
+                print(f"  [MODEL] Using local OpenAI-compatible endpoint: {self.api_base}", flush=True)
         else:
             self.client = None
+
+    def _record_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        if prompt_tokens is None:
+            prompt_tokens = getattr(usage, "input_tokens", 0)
+
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        if completion_tokens is None:
+            completion_tokens = getattr(usage, "output_tokens", 0)
+
+        total_tokens = getattr(usage, "total_tokens", None)
+        if total_tokens is None:
+            total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
+
+        self.usage_totals["prompt_tokens"] += int(prompt_tokens or 0)
+        self.usage_totals["completion_tokens"] += int(completion_tokens or 0)
+        self.usage_totals["total_tokens"] += int(total_tokens or 0)
+        self.usage_totals["requests"] += 1
+        self.usage_available = True
+
+    def print_usage_summary(self) -> None:
+        if not self.usage_available:
+            print("Token usage: unavailable from model/backend response.", flush=True)
+            return
+
+        print(
+            "Token usage: "
+            f"{self.usage_totals['total_tokens']} total "
+            f"({self.usage_totals['prompt_tokens']} prompt, "
+            f"{self.usage_totals['completion_tokens']} completion) "
+            f"across {self.usage_totals['requests']} request(s).",
+            flush=True,
+        )
 
     def _fallback_plan(self, product: ProductInput) -> ListingPlan:
         title = product.product_id
@@ -58,18 +103,6 @@ class ListingAnalyzer:
         )
 
     def analyze(self, product: ProductInput) -> ListingPlan:
-        # Check for cached plan first
-        listing_path = product.root_dir / "listing_plan.json"
-        if listing_path.exists():
-            try:
-                data = json.loads(listing_path.read_text(encoding="utf-8"))
-                # Basic validation to ensure it's not a fallback/empty plan
-                if data.get("attributes", {}).get("source") != "fallback":
-                    print(f"  [CACHE] Using existing listing plan for {product.product_id}")
-                    return ListingPlan(**data)
-            except Exception as e:
-                print(f"  [DEBUG] Could not load cache: {e}")
-
         if not self.client:
             return self._fallback_plan(product)
 
@@ -79,6 +112,10 @@ class ListingAnalyzer:
         for count in counts_to_try:
             image_blocks = []
             selected_paths = product.image_paths[:count]
+            print(
+                f"  [MODEL] Preparing {len(selected_paths)} image(s) for {product.product_id}...",
+                flush=True,
+            )
             
             for path in selected_paths:
                 if self.use_local_model:
@@ -96,7 +133,7 @@ class ListingAnalyzer:
                                 }
                             )
                     except Exception as e:
-                        print(f"  [DEBUG] Failed to encode {path}: {e}")
+                        print(f"  [DEBUG] Failed to encode {path}: {e}", flush=True)
                 else:
                     image_blocks.append(
                         {
@@ -121,27 +158,36 @@ class ListingAnalyzer:
                 prompt += f"\n\nOpis użytkownika:\n{product.optional_text}"
 
             try:
+                print(
+                    f"  [MODEL] Sending request for {product.product_id} with {len(image_blocks)} image(s)...",
+                    flush=True,
+                )
+                started_at = time.monotonic()
                 if self.use_local_model:
                     resp = self.client.chat.completions.create(
                         model=self.settings.openai_model,
                         messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, *image_blocks]}],
                     )
+                    self._record_usage(resp)
                     text = resp.choices[0].message.content.strip()
                 else:
                     resp = self.client.responses.create(
                         model=self.settings.openai_model,
                         input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}, *image_blocks]}],
                     )
+                    self._record_usage(resp)
                     text = resp.output_text.strip()
-                
+                elapsed = time.monotonic() - started_at
+                print(f"  [MODEL] Response received in {elapsed:.1f}s.", flush=True)
+
                 # If we got here, the count worked
                 break
             except Exception as e:
                 if "context" in str(e).lower() and count > 1:
-                    print(f"  [RETRY] Count {count} too large for local model, trying fewer images...")
+                    print(f"  [RETRY] Count {count} too large for local model, trying fewer images...", flush=True)
                     continue
                 else:
-                    print(f"  [ERROR] Model failed at count {count}: {e}")
+                    print(f"  [ERROR] Model failed at count {count}: {e}", flush=True)
                     return self._fallback_plan(product)
 
         # Clean up JSON
