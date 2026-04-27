@@ -6,6 +6,7 @@ import json
 import os
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 import streamlit as st
@@ -13,6 +14,8 @@ import streamlit as st
 st.set_page_config(page_title="Agentic Seller", layout="wide")
 
 API_URL = os.getenv("API_URL", "http://backend:8000")
+SHOP_OPTIONS = ["", "KC", "FW", "KEN", "MAG"]
+PACKAGE_SIZE_OPTIONS = ["small", "medium", "large"]
 
 
 def api_get(path: str, **kwargs) -> dict:
@@ -33,10 +36,31 @@ def api_put(path: str, **kwargs) -> dict:
     return response.json()
 
 
+def api_delete(path: str, **kwargs) -> dict:
+    response = requests.delete(f"{API_URL}{path}", timeout=30, **kwargs)
+    response.raise_for_status()
+    return response.json()
+
+
 def api_bytes(path: str) -> bytes:
     response = requests.get(f"{API_URL}{path}", timeout=20)
     response.raise_for_status()
     return response.content
+
+
+def api_error_message(exc: requests.exceptions.RequestException) -> str:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return str(exc)
+    try:
+        detail = response.json().get("detail")
+    except ValueError:
+        detail = response.text.strip()
+    return f"{exc} ({detail})" if detail else str(exc)
+
+
+def product_file_path(product: dict, image_name: str) -> str:
+    return f"/products/{quote(product['product_id'])}/files/{quote(image_name)}"
 
 
 def current_user() -> dict | None:
@@ -109,7 +133,7 @@ def show_thumbnails(product: dict, max_images: int = 8) -> None:
     for index, image_name in enumerate(images):
         with columns[index % len(columns)]:
             try:
-                content = api_bytes(f"/products/{product['product_id']}/files/{image_name}")
+                content = api_bytes(product_file_path(product, image_name))
             except requests.exceptions.RequestException:
                 st.warning(image_name)
             else:
@@ -118,8 +142,8 @@ def show_thumbnails(product: dict, max_images: int = 8) -> None:
 
 def rotate_product_image(product: dict, image_name: str, degrees: int) -> None:
     api_post(
-        f"/products/{product['product_id']}/files/{image_name}/rotate",
-        json={"degrees": degrees},
+        f"/products/{quote(product['product_id'])}/files/rotate",
+        json={"filename": image_name, "degrees": degrees},
     )
 
 
@@ -133,7 +157,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
     for index, image_name in enumerate(images):
         with columns[index % len(columns)]:
             try:
-                content = api_bytes(f"/products/{product['product_id']}/files/{image_name}")
+                content = api_bytes(product_file_path(product, image_name))
             except requests.exceptions.RequestException:
                 st.warning(image_name)
                 continue
@@ -144,14 +168,14 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
                 try:
                     rotate_product_image(product, image_name, -90)
                 except requests.exceptions.RequestException as exc:
-                    st.error(f"Rotation failed: {exc}")
+                    st.error(f"Rotation failed: {api_error_message(exc)}")
                 else:
                     st.rerun()
             if right.button("Rotate right", key=f"rotate_right_{product['product_id']}_{image_name}"):
                 try:
                     rotate_product_image(product, image_name, 90)
                 except requests.exceptions.RequestException as exc:
-                    st.error(f"Rotation failed: {exc}")
+                    st.error(f"Rotation failed: {api_error_message(exc)}")
                 else:
                     st.rerun()
 
@@ -164,7 +188,7 @@ def show_preview_image(product: dict) -> None:
 
     image_name = images[0]
     try:
-        content = api_bytes(f"/products/{product['product_id']}/files/{image_name}")
+        content = api_bytes(product_file_path(product, image_name))
     except requests.exceptions.RequestException:
         st.caption("Preview unavailable")
     else:
@@ -179,6 +203,54 @@ def format_price(product: dict) -> str:
     return f"{price:.0f} {currency}"
 
 
+def option_index(options: list[str], value: str | None, default: int = 0) -> int:
+    return options.index(value) if value in options else default
+
+
+def product_archive_name(product: dict) -> str:
+    return f"{product['product_id']}.zip"
+
+
+def product_download_path(product: dict) -> str:
+    return f"/products/{quote(product['product_id'])}/download"
+
+
+def delete_product(product: dict) -> None:
+    api_delete(f"/products/{quote(product['product_id'])}")
+
+
+def show_product_actions(product: dict, key_prefix: str) -> None:
+    if current_user()["role"] != "boss":
+        return
+
+    with st.expander("Product actions"):
+        download_key = f"{key_prefix}_download_data"
+        if st.button("Prepare download", key=f"{key_prefix}_prepare_download"):
+            try:
+                st.session_state[download_key] = api_bytes(product_download_path(product))
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Download unavailable: {api_error_message(exc)}")
+
+        if download_key in st.session_state:
+            st.download_button(
+                "Download product data",
+                data=st.session_state[download_key],
+                file_name=product_archive_name(product),
+                mime="application/zip",
+                key=f"{key_prefix}_download",
+            )
+
+        confirm = st.checkbox("Confirm delete", key=f"{key_prefix}_confirm_delete")
+        if st.button("Delete product", disabled=not confirm, key=f"{key_prefix}_delete"):
+            try:
+                delete_product(product)
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Delete failed: {api_error_message(exc)}")
+            else:
+                st.success("Deleted.")
+                st.rerun()
+
+
 def show_product_details(product: dict, key_prefix: str) -> None:
     listing = product.get("listing") or {}
 
@@ -187,6 +259,10 @@ def show_product_details(product: dict, key_prefix: str) -> None:
     meta_cols[1].write(f"Category: **{product.get('category') or '-'}**")
     meta_cols[2].write(f"Price: **{format_price(product)}**")
     meta_cols[3].write(f"Added by: **{product.get('added_by') or '-'}**")
+
+    ops_cols = st.columns(2)
+    ops_cols[0].write(f"Shop: **{product.get('shop') or '-'}**")
+    ops_cols[1].write(f"Package: **{product.get('package_size') or '-'}**")
 
     if product.get("approved_by"):
         st.caption(f"Approved by {product['approved_by']}")
@@ -204,6 +280,7 @@ def show_product_details(product: dict, key_prefix: str) -> None:
         st.info("No generated description yet.")
 
     show_thumbnails(product, max_images=8)
+    show_product_actions(product, key_prefix)
 
 
 def product_table(products: list[dict], key_prefix: str) -> None:
@@ -239,6 +316,13 @@ def upload_page() -> None:
     with left:
         with st.form("upload_product_form", clear_on_submit=True):
             product_name = st.text_input("Item name")
+            form_cols = st.columns(2)
+            shop = form_cols[0].selectbox("Shop", SHOP_OPTIONS)
+            package_size = form_cols[1].selectbox(
+                "Package size",
+                PACKAGE_SIZE_OPTIONS,
+                index=option_index(PACKAGE_SIZE_OPTIONS, "medium"),
+            )
             notes = st.text_area("Notes", height=120)
             files = st.file_uploader(
                 "Photos and documents",
@@ -268,6 +352,8 @@ def upload_page() -> None:
                         "product_name": product_name,
                         "notes": notes,
                         "added_by": current_user()["username"],
+                        "shop": shop,
+                        "package_size": package_size,
                     },
                     files=multipart_files,
                 )
@@ -319,7 +405,7 @@ def review_page() -> None:
     product_id = options[selected_label]
 
     try:
-        product = api_get(f"/products/{product_id}")
+        product = api_get(f"/products/{quote(product_id)}")
     except requests.exceptions.RequestException as exc:
         st.error(f"Could not load item: {exc}")
         return
@@ -340,6 +426,23 @@ def review_page() -> None:
             st.warning("No generated listing yet. Run the local generator, then sync or refresh this item.")
 
         with st.form(f"review_form_{product_id}"):
+            meta_cols = st.columns(3)
+            shop = meta_cols[0].selectbox(
+                "Shop",
+                SHOP_OPTIONS,
+                index=option_index(SHOP_OPTIONS, product.get("shop")),
+            )
+            package_size = meta_cols[1].selectbox(
+                "Package size",
+                PACKAGE_SIZE_OPTIONS,
+                index=option_index(PACKAGE_SIZE_OPTIONS, product.get("package_size"), default=1),
+            )
+            actual_store_shelf_price = meta_cols[2].number_input(
+                "Actual store shelf price",
+                min_value=0.0,
+                value=float(product.get("actual_store_shelf_price") or 0.0),
+                step=1.0,
+            )
             title = st.text_input("Title", value=listing.get("title", product["product_id"]))
             price = st.number_input("Price", min_value=0.0, value=float(listing.get("price") or 0.0), step=1.0)
             currency = st.text_input("Currency", value=listing.get("currency", "PLN"))
@@ -378,21 +481,31 @@ def review_page() -> None:
                     "cover_image": cover_image,
                 }
                 try:
-                    api_put(f"/products/{product_id}/listing", json=payload)
+                    api_put(f"/products/{quote(product_id)}/listing", json=payload)
+                    api_put(
+                        f"/products/{quote(product_id)}/metadata",
+                        json={
+                            "shop": shop or None,
+                            "package_size": package_size,
+                            "actual_store_shelf_price": actual_store_shelf_price,
+                        },
+                    )
                 except requests.exceptions.RequestException as exc:
-                    st.error(f"Save failed: {exc}")
+                    st.error(f"Save failed: {api_error_message(exc)}")
                 else:
                     st.success("Saved.")
                     st.rerun()
 
         if listing and st.button("Approve For Publishing", type="primary"):
             try:
-                api_post(f"/products/{product_id}/approve", data={"username": current_user()["username"]})
+                api_post(f"/products/{quote(product_id)}/approve", data={"username": current_user()["username"]})
             except requests.exceptions.RequestException as exc:
                 st.error(f"Approval failed: {exc}")
             else:
                 st.success("Approved and moved to ready.")
                 st.rerun()
+
+        show_product_actions(product, f"review_{product_id}")
 
 
 def users_page() -> None:
@@ -409,6 +522,78 @@ def users_page() -> None:
             st.error(f"Could not create user: {exc}")
         else:
             st.success(f"Created {username}")
+
+    st.divider()
+    st.subheader("Data retention")
+    try:
+        retention = api_get("/admin/retention")
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Could not load retention policy: {api_error_message(exc)}")
+        return
+
+    policy = retention.get("policy", {})
+    st.caption(
+        "Uploaded/in-review items are kept for "
+        f"{policy.get('pending_days', '-')} days; ready-to-publish items are kept for "
+        f"{policy.get('ready_days', '-')} days. Cleanup runs every "
+        f"{policy.get('check_hours', '-')} hours."
+    )
+
+    admin_cols = st.columns(2)
+    with admin_cols[0]:
+        if st.button("Prepare full export"):
+            try:
+                st.session_state["all_product_data_export"] = api_bytes("/admin/data/export")
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Full export unavailable: {api_error_message(exc)}")
+
+        if "all_product_data_export" in st.session_state:
+            st.download_button(
+                "Download all product data",
+                data=st.session_state["all_product_data_export"],
+                file_name="agentic-seller-data.zip",
+                mime="application/zip",
+                key="download_all_data",
+            )
+
+    with admin_cols[1]:
+        if st.button("Run retention cleanup"):
+            try:
+                result = api_post("/admin/retention/run")
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Cleanup failed: {api_error_message(exc)}")
+            else:
+                st.success(f"Deleted {len(result.get('deleted', []))} expired item(s).")
+                st.rerun()
+
+    st.divider()
+    st.subheader("Daily email backup")
+    try:
+        backup = api_get("/admin/backup")
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Could not load backup status: {api_error_message(exc)}")
+        return
+
+    backup_status = "configured" if backup.get("configured") else "not configured"
+    st.caption(
+        f"Daily backup is {backup_status}. Scheduled hour: "
+        f"{backup.get('hour_utc', '-'):02}:00 UTC."
+    )
+    if backup.get("admin_email"):
+        st.write(f"Recipient: **{backup['admin_email']}**")
+    if backup.get("last_sent_at"):
+        st.write(f"Last sent: **{backup['last_sent_at']}**")
+    if backup.get("last_error"):
+        st.warning(f"Last backup error: {backup['last_error']}")
+
+    if st.button("Send backup email now", disabled=not backup.get("configured")):
+        try:
+            result = api_post("/admin/backup/run")
+        except requests.exceptions.RequestException as exc:
+            st.error(f"Backup failed: {api_error_message(exc)}")
+        else:
+            st.success(f"Backup sent to {result.get('admin_email')}.")
+            st.rerun()
 
 
 if current_user() is None:
