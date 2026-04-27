@@ -106,10 +106,6 @@ run_in_backend_data_container() {
     --marketplaces "${MARKETPLACES[@]}"
   )
 
-  if [[ "$RECALCULATE" != "1" ]]; then
-    cli_args+=(--use-cached-listings)
-  fi
-
   docker run --rm \
     --network host \
     --volumes-from "$backend_container" \
@@ -244,7 +240,9 @@ CLI_ARGS=(
 )
 
 if [[ "$RECALCULATE" != "1" ]]; then
-  CLI_ARGS+=(--use-cached-listings)
+  if "$PYTHON" -m agentic_seller.cli --help | grep -q -- "--use-cached-listings"; then
+    CLI_ARGS+=(--use-cached-listings)
+  fi
 fi
 
 "$PYTHON" "${CLI_ARGS[@]}"
