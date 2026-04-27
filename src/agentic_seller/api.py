@@ -312,6 +312,7 @@ def _rotate_image_file(file_path: Path, degrees: int) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Rotation must be 90, 180, or 270 degrees")
 
     product_dir = file_path.parent
+    rotated_at = datetime.utcnow().isoformat()
     try:
         with Image.open(file_path) as image:
             image_format = image.format
@@ -324,7 +325,25 @@ def _rotate_image_file(file_path: Path, degrees: int) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not rotate image: {exc}") from exc
 
-    _write_status(product_dir, {"last_image_rotation_at": datetime.utcnow().isoformat()})
+    status = _status_for(product_dir)
+    rotations = status.get("image_rotations") if isinstance(status.get("image_rotations"), dict) else {}
+    current = rotations.get(file_path.name) if isinstance(rotations.get(file_path.name), dict) else {}
+    previous_degrees = int(current.get("degrees", 0) or 0)
+    effective_degrees = (previous_degrees + degrees) % 360
+    rotations[file_path.name] = {
+        "degrees": effective_degrees,
+        "last_delta_degrees": degrees,
+        "updated_at": rotated_at,
+        "count": int(current.get("count", 0) or 0) + 1,
+    }
+
+    _write_status(
+        product_dir,
+        {
+            "last_image_rotation_at": rotated_at,
+            "image_rotations": rotations,
+        },
+    )
     return _product_summary(product_dir)
 
 
@@ -394,6 +413,7 @@ def _product_summary(product_dir: Path) -> dict[str, Any]:
         "shop": status_meta.get("shop"),
         "package_size": status_meta.get("package_size"),
         "actual_store_shelf_price": status_meta.get("actual_store_shelf_price"),
+        "image_rotations": status_meta.get("image_rotations", {}),
     }
 
 
