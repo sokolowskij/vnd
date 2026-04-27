@@ -115,6 +115,46 @@ def show_thumbnails(product: dict, max_images: int = 8) -> None:
                 st.image(BytesIO(content), caption=image_name, use_container_width=True)
 
 
+def rotate_product_image(product: dict, image_name: str, degrees: int) -> None:
+    api_post(
+        f"/products/{product['product_id']}/files/{image_name}/rotate",
+        json={"degrees": degrees},
+    )
+
+
+def show_review_images(product: dict, max_images: int = 8) -> None:
+    images = product.get("images", [])[:max_images]
+    if not images:
+        st.info("No photos uploaded.")
+        return
+
+    columns = st.columns(min(4, len(images)))
+    for index, image_name in enumerate(images):
+        with columns[index % len(columns)]:
+            try:
+                content = api_bytes(f"/products/{product['product_id']}/files/{image_name}")
+            except requests.exceptions.RequestException:
+                st.warning(image_name)
+                continue
+
+            st.image(BytesIO(content), caption=image_name, use_container_width=True)
+            left, right = st.columns(2)
+            if left.button("Rotate left", key=f"rotate_left_{product['product_id']}_{image_name}"):
+                try:
+                    rotate_product_image(product, image_name, -90)
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Rotation failed: {exc}")
+                else:
+                    st.rerun()
+            if right.button("Rotate right", key=f"rotate_right_{product['product_id']}_{image_name}"):
+                try:
+                    rotate_product_image(product, image_name, 90)
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Rotation failed: {exc}")
+                else:
+                    st.rerun()
+
+
 def show_preview_image(product: dict) -> None:
     images = product.get("images", [])
     if not images:
@@ -285,7 +325,7 @@ def review_page() -> None:
 
     left, right = st.columns([1.1, 1])
     with left:
-        show_thumbnails(product)
+        show_review_images(product)
 
     listing = product.get("listing") or {}
     image_paths = listing.get("image_paths") or []

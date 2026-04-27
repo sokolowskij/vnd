@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Agentic Seller Review API", version="0.2.0")
@@ -49,6 +50,10 @@ class ListingUpdate(BaseModel):
     condition: str
     attributes: dict[str, Any] = Field(default_factory=dict)
     cover_image: str | None = None
+
+
+class ImageRotateRequest(BaseModel):
+    degrees: int
 
 
 class UploadResponse(BaseModel):
@@ -153,6 +158,17 @@ def _list_product_files(product_dir: Path) -> list[str]:
 
 def _list_images(product_dir: Path) -> list[str]:
     return [p.name for p in sorted(product_dir.iterdir()) if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
+
+
+def _product_file_path(product_id: str, filename: str, require_image: bool = False) -> Path:
+    product_dir = _product_path(product_id)
+    safe_filename = _safe_name(filename)
+    file_path = product_dir / safe_filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    if require_image and file_path.suffix.lower() not in IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="File is not a supported image")
+    return file_path
 
 
 def _listing_for(product_dir: Path) -> dict[str, Any] | None:
@@ -312,12 +328,33 @@ async def get_product(product_id: str):
 
 @app.get("/products/{product_id}/files/{filename}")
 async def get_product_file(product_id: str, filename: str):
-    product_dir = _product_path(product_id)
-    safe_filename = _safe_name(filename)
-    file_path = product_dir / safe_filename
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
+    file_path = _product_file_path(product_id, filename)
     return FileResponse(file_path)
+
+
+@app.post("/products/{product_id}/files/{filename}/rotate")
+async def rotate_product_image(product_id: str, filename: str, request: ImageRotateRequest):
+    degrees = request.degrees
+    if degrees not in {-270, -180, -90, 90, 180, 270}:
+        raise HTTPException(status_code=400, detail="Rotation must be 90, 180, or 270 degrees")
+
+    file_path = _product_file_path(product_id, filename, require_image=True)
+    product_dir = file_path.parent
+
+    try:
+        with Image.open(file_path) as image:
+            image_format = image.format
+            normalized = ImageOps.exif_transpose(image)
+            rotated = normalized.rotate(-degrees, expand=True)
+            if file_path.suffix.lower() in {".jpg", ".jpeg"} and rotated.mode in {"RGBA", "LA", "P"}:
+                rotated = rotated.convert("RGB")
+            rotated.load()
+        rotated.save(file_path, format=image_format, quality=95)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not rotate image: {exc}") from exc
+
+    _write_status(product_dir, {"last_image_rotation_at": datetime.utcnow().isoformat()})
+    return _product_summary(product_dir)
 
 
 @app.put("/products/{product_id}/listing")
