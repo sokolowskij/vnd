@@ -671,6 +671,7 @@ def users_page() -> None:
         f"Daily backup is {backup_status}. Scheduled hour: "
         f"{backup.get('hour_utc', '-'):02}:00 UTC."
     )
+    st.caption(f"Email attachment limit: {backup.get('max_attachment_mb', '-')} MB.")
     if backup.get("admin_email"):
         st.write(f"Recipient: **{backup['admin_email']}**")
     if backup.get("last_sent_at"):
@@ -678,14 +679,26 @@ def users_page() -> None:
     if backup.get("last_error"):
         st.warning(f"Last backup error: {backup['last_error']}")
 
-    if st.button("Send backup email now", disabled=not backup.get("configured")):
-        try:
-            result = api_post("/admin/backup/run")
-        except requests.exceptions.RequestException as exc:
-            st.error(f"Backup failed: {api_error_message(exc)}")
-        else:
-            st.success(f"Backup sent to {result.get('admin_email')}.")
-            st.rerun()
+    test_col, backup_col = st.columns(2)
+    with test_col:
+        if st.button("Send test email", disabled=not backup.get("configured")):
+            try:
+                result = api_post("/admin/backup/test")
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Test email failed: {api_error_message(exc)}")
+            else:
+                st.success(f"Test email sent to {result.get('admin_email')}.")
+                st.rerun()
+
+    with backup_col:
+        if st.button("Send backup email now", disabled=not backup.get("configured")):
+            try:
+                result = api_post("/admin/backup/run")
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Backup failed: {api_error_message(exc)}")
+            else:
+                st.success(f"Backup sent to {result.get('admin_email')}.")
+                st.rerun()
 
 
 restore_session_from_cookie()

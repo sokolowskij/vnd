@@ -37,6 +37,7 @@ READY_RETENTION_DAYS = int(os.getenv("READY_RETENTION_DAYS", "30"))
 RETENTION_CHECK_HOURS = int(os.getenv("RETENTION_CHECK_HOURS", "24"))
 DAILY_BACKUP_ENABLED = os.getenv("DAILY_BACKUP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 DAILY_BACKUP_HOUR_UTC = int(os.getenv("DAILY_BACKUP_HOUR_UTC", "3"))
+MAX_BACKUP_EMAIL_MB = int(os.getenv("MAX_BACKUP_EMAIL_MB", "20"))
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 ADMIN_BACKUP_EMAIL = os.getenv("ADMIN_BACKUP_EMAIL", "").strip()
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
@@ -515,11 +516,47 @@ def _backup_status() -> dict[str, Any]:
         "admin_email": ADMIN_BACKUP_EMAIL or None,
         "smtp_host": SMTP_HOST or None,
         "hour_utc": DAILY_BACKUP_HOUR_UTC,
+        "max_attachment_mb": MAX_BACKUP_EMAIL_MB,
         "last_result": status.get("last_result"),
         "last_sent_at": status.get("last_sent_at"),
         "last_error_at": status.get("last_error_at"),
         "last_error": status.get("last_error"),
     }
+
+
+def _send_smtp_message(message: EmailMessage) -> None:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as smtp:
+        if SMTP_USE_TLS:
+            smtp.starttls()
+        if SMTP_USERNAME:
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+        smtp.send_message(message)
+
+
+def _send_test_email() -> dict[str, Any]:
+    if not _backup_configured():
+        raise RuntimeError("Backup email is not configured")
+
+    sent_at = datetime.utcnow()
+    message = EmailMessage()
+    message["Subject"] = "Agentic Seller email test"
+    message["From"] = SMTP_FROM_EMAIL
+    message["To"] = ADMIN_BACKUP_EMAIL
+    message.set_content(
+        "This is a test email from Agentic Seller.\n\n"
+        "If you received this, SMTP is configured correctly.\n"
+    )
+
+    _send_smtp_message(message)
+
+    result = {
+        "last_result": "test_sent",
+        "last_sent_at": sent_at.isoformat(),
+        "last_error_at": None,
+        "last_error": None,
+    }
+    _write_json(backup_status_path(), result)
+    return _backup_status()
 
 
 def _send_daily_backup_email() -> dict[str, Any]:
@@ -531,6 +568,15 @@ def _send_daily_backup_email() -> dict[str, Any]:
     archive = _create_zip_archive([products_dir(), ready_dir()], archive_name)
 
     try:
+        max_bytes = MAX_BACKUP_EMAIL_MB * 1024 * 1024
+        archive_size = archive.stat().st_size
+        if archive_size > max_bytes:
+            size_mb = archive_size / 1024 / 1024
+            raise RuntimeError(
+                f"Backup zip is {size_mb:.1f} MB, above the {MAX_BACKUP_EMAIL_MB} MB email limit. "
+                "Use Download all product data instead, or raise MAX_BACKUP_EMAIL_MB if your SMTP provider allows it."
+            )
+
         message = EmailMessage()
         message["Subject"] = f"Agentic Seller daily backup {sent_at.strftime('%Y-%m-%d')}"
         message["From"] = SMTP_FROM_EMAIL
@@ -547,12 +593,7 @@ def _send_daily_backup_email() -> dict[str, Any]:
             filename=f"{archive_name}.zip",
         )
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as smtp:
-            if SMTP_USE_TLS:
-                smtp.starttls()
-            if SMTP_USERNAME:
-                smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-            smtp.send_message(message)
+        _send_smtp_message(message)
     finally:
         archive.unlink(missing_ok=True)
 
@@ -774,6 +815,15 @@ async def run_backup_email(_: dict[str, str] = Depends(boss_user)):
     except Exception as exc:
         _record_backup_error(exc)
         raise HTTPException(status_code=400, detail=f"Backup email failed: {exc}") from exc
+
+
+@app.post("/admin/backup/test")
+async def run_backup_test_email(_: dict[str, str] = Depends(boss_user)):
+    try:
+        return await asyncio.to_thread(_send_test_email)
+    except Exception as exc:
+        _record_backup_error(exc)
+        raise HTTPException(status_code=400, detail=f"Test email failed: {exc}") from exc
 
 
 @app.post("/products/{product_id}/files/rotate")
