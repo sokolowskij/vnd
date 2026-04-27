@@ -756,6 +756,18 @@ async def run_backup_email(_: dict[str, str] = Depends(boss_user)):
         raise HTTPException(status_code=400, detail=f"Backup email failed: {exc}") from exc
 
 
+@app.post("/products/{product_id}/files/rotate")
+async def rotate_product_image_by_request(
+    product_id: str,
+    request: ImageRotateRequest,
+    _: dict[str, str] = Depends(boss_user),
+):
+    if not request.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    file_path = _product_file_path(product_id, request.filename, require_image=True)
+    return _rotate_image_file(file_path, request.degrees)
+
+
 @app.get("/products/{product_id}/files/{filename}")
 async def get_product_file(product_id: str, filename: str, _: dict[str, str] = Depends(current_user)):
     file_path = _product_file_path(product_id, filename)
@@ -770,18 +782,6 @@ async def rotate_product_image(
     _: dict[str, str] = Depends(boss_user),
 ):
     file_path = _product_file_path(product_id, filename, require_image=True)
-    return _rotate_image_file(file_path, request.degrees)
-
-
-@app.post("/products/{product_id}/files/rotate")
-async def rotate_product_image_by_request(
-    product_id: str,
-    request: ImageRotateRequest,
-    _: dict[str, str] = Depends(boss_user),
-):
-    if not request.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-    file_path = _product_file_path(product_id, request.filename, require_image=True)
     return _rotate_image_file(file_path, request.degrees)
 
 

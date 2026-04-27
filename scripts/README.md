@@ -34,10 +34,18 @@ git pull
 chmod +x scripts/aws-*.sh
 ```
 
-Reload only the frontend after UI changes:
+Reload the app after pulled changes:
 
 ```bash
 ./scripts/aws-reload-frontend.sh
+```
+
+Despite the script name, this reloads both backend and frontend by default so API routes and UI stay in sync.
+
+Reload only the frontend after a true UI-only change:
+
+```bash
+FRONTEND_ONLY=1 ./scripts/aws-reload-frontend.sh
 ```
 
 Start the full app:
@@ -57,6 +65,7 @@ Run with production compose override:
 ```bash
 USE_PROD_COMPOSE=1 ./scripts/aws-start.sh
 USE_PROD_COMPOSE=1 ./scripts/aws-reload-frontend.sh
+FRONTEND_ONLY=1 USE_PROD_COMPOSE=1 ./scripts/aws-reload-frontend.sh
 USE_PROD_COMPOSE=1 ./scripts/aws-stop.sh
 ```
 
