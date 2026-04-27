@@ -151,6 +151,53 @@ USER_DATA_DIR=browser_profiles
 
 Start LM Studio’s local server before running generation.
 
+## Generate AWS Uploads With Local LM Studio
+
+Use this when products were uploaded to the AWS app and you want AWS to process those files without copying them to your PC. Your Windows machine provides the model; AWS keeps and processes the data.
+
+1. On your Windows machine, start LM Studio and enable its local server on port `1234`.
+
+2. Open a reverse tunnel from Windows to AWS and keep this PowerShell window open:
+
+```powershell
+cd C:\Users\jedre\Desktop\snn
+.\scripts\open-lmstudio-aws-tunnel.ps1
+```
+
+This makes AWS `127.0.0.1:1234` forward to your local LM Studio.
+
+3. In another terminal, SSH into AWS and run the AWS pipeline:
+
+```bash
+ssh -i ~/.ssh/vnd_aws ubuntu@51.102.104.11
+cd /opt/vnd
+chmod +x scripts/aws-run-local-lm-pipeline.sh
+./scripts/aws-run-local-lm-pipeline.sh
+```
+
+The script reads products from:
+
+```text
+/app/data/products
+```
+
+and writes generated `listing_plan.json` / `post_results.json` files back into the same AWS product folders.
+
+Useful AWS-side variants:
+
+```bash
+MODE=dry_run MARKETPLACES="facebook" ./scripts/aws-run-local-lm-pipeline.sh
+MODE=publish MARKETPLACES="facebook" ./scripts/aws-run-local-lm-pipeline.sh
+USE_PROD_COMPOSE=1 ./scripts/aws-run-local-lm-pipeline.sh
+REBUILD=1 ./scripts/aws-run-local-lm-pipeline.sh
+```
+
+If you want to test the tunnel manually on AWS:
+
+```bash
+curl http://127.0.0.1:1234/v1/models
+```
+
 ## Sync Server Uploads To Local
 
 Uploaded products live in the AWS Docker volume, so pull them out through the backend container.
