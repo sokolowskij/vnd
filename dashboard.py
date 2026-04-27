@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from io import BytesIO
+from pathlib import Path
 
 import requests
 import streamlit as st
@@ -352,7 +353,11 @@ def review_page() -> None:
             )
             cover_options = image_paths or [str(product["product_dir"] + "/" + name) for name in product.get("images", [])]
             cover_index = cover_options.index(current_cover) if current_cover in cover_options else 0
-            cover_image = st.selectbox("Cover image", cover_options, index=cover_index) if cover_options else None
+            cover_image = (
+                st.selectbox("Cover image", cover_options, index=cover_index, format_func=lambda path: Path(path).name)
+                if cover_options
+                else None
+            )
 
             save_clicked = st.form_submit_button("Save Changes")
 

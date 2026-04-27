@@ -1,0 +1,16 @@
+# Keep text files LF in both the index and working tree.
+# PowerShell accepts LF, while CRLF can break Linux shell scripts.
+* text=auto eol=lf
+
+# Binary files should never be line-ending-normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.db binary
+*.sqlite binary
+*.exe binary
