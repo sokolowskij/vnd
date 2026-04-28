@@ -254,7 +254,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
         st.info("No photos uploaded.")
         return
 
-    columns = st.columns(min(4, len(images)))
+    columns = st.columns(min(2, len(images)))
     for index, image_name in enumerate(images):
         with columns[index % len(columns)]:
             try:
@@ -548,7 +548,7 @@ def review_page() -> None:
         st.error(f"Could not load item: {exc}")
         return
 
-    left, right = st.columns([1.1, 1])
+    left, right = st.columns([1, 1])
     with left:
         show_review_images(product)
 
