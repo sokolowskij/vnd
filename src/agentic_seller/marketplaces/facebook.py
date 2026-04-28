@@ -58,21 +58,61 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
                 print(f"  [WARN] Image not found, skipping: {path}")
         return image_paths
 
+    def _set_files_from_photo_button(self, page: Any, image_paths: list[str]) -> bool:
+        labels = [
+            "Dodaj zdjęcia",
+            "Dodaj zdjęcie",
+            "Zdjęcia",
+            "Add photos",
+            "Add photo",
+            "Photos",
+        ]
+        for label in labels:
+            try:
+                button = page.get_by_role("button", name=re.compile(re.escape(label), re.IGNORECASE)).first
+                with page.expect_file_chooser(timeout=3000) as chooser_info:
+                    button.click(timeout=1500)
+                chooser_info.value.set_files(image_paths)
+                page.wait_for_timeout(3000)
+                print(f"  [OK] Uploaded {len(image_paths)} photo(s) to Facebook.")
+                return True
+            except Exception:
+                continue
+        return False
+
     def _upload_images(self, page: Any, listing: ListingPlan) -> bool:
         image_paths = self._absolute_existing_images(listing)
         if not image_paths:
             print("  [WARN] No existing images found for Facebook upload.")
             return False
 
-        file_input = page.locator("input[type='file'][accept*='image'], input[type='file']").first
+        file_selectors = [
+            "input[type='file'][accept*='image']",
+            "input[type='file'][multiple]",
+            "input[type='file']",
+        ]
+        last_error: Exception | None = None
+        for selector in file_selectors:
+            file_input = page.locator(selector).first
+            try:
+                file_input.wait_for(state="attached", timeout=3000)
+                file_input.set_input_files(image_paths)
+                page.wait_for_timeout(3000)
+                print(f"  [OK] Uploaded {len(image_paths)} photo(s) to Facebook.")
+                return True
+            except Exception as exc:
+                last_error = exc
+
+        if self._set_files_from_photo_button(page, image_paths):
+            return True
+
         try:
-            file_input.wait_for(state="attached", timeout=10000)
-            file_input.set_input_files(image_paths)
-            page.wait_for_timeout(2000)
+            page.set_input_files("input[type='file']", image_paths, timeout=10000)
+            page.wait_for_timeout(3000)
             print(f"  [OK] Uploaded {len(image_paths)} photo(s) to Facebook.")
             return True
         except Exception as exc:
-            print(f"  [WARN] Facebook photo upload failed: {exc}")
+            print(f"  [WARN] Facebook photo upload failed: {exc or last_error}")
             return False
 
     def post(self, context: Any, listing: ListingPlan, mode: str) -> PostResult:

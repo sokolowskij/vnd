@@ -256,14 +256,24 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
 
             st.image(BytesIO(content), caption=image_name, use_container_width=True)
             left, right = st.columns(2)
-            if left.button("Rotate left", key=f"rotate_left_{product['product_id']}_{image_name}"):
+            if left.button(
+                "↺",
+                key=f"rotate_left_{product['product_id']}_{image_name}",
+                help="Rotate left",
+                use_container_width=True,
+            ):
                 try:
                     rotate_product_image(product, image_name, -90)
                 except requests.exceptions.RequestException as exc:
                     st.error(f"Rotation failed: {api_error_message(exc)}")
                 else:
                     st.rerun()
-            if right.button("Rotate right", key=f"rotate_right_{product['product_id']}_{image_name}"):
+            if right.button(
+                "↻",
+                key=f"rotate_right_{product['product_id']}_{image_name}",
+                help="Rotate right",
+                use_container_width=True,
+            ):
                 try:
                     rotate_product_image(product, image_name, 90)
                 except requests.exceptions.RequestException as exc:

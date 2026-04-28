@@ -4,6 +4,7 @@ Runs local listing generation and optional publishing.
 Examples:
   .\scripts\run-local-pipeline.ps1
   .\scripts\run-local-pipeline.ps1 -Mode dry_run -DataDir .\data\products
+  .\scripts\run-local-pipeline.ps1 -Mode publish -DataDir .\data\ready_to_publish
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -Recalculate
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces olx,facebook -Yes
@@ -18,7 +19,7 @@ Notes:
 
 [CmdletBinding()]
 param(
-    [string]$DataDir = ".\data\products",
+    [string]$DataDir = "",
     [ValidateSet("dry_run", "publish")]
     [string]$Mode = "dry_run",
     [string[]]$Marketplaces = @("olx", "facebook"),
@@ -51,6 +52,14 @@ if ($Mode -eq "publish" -and -not $Yes) {
     if ($answer -ne "PUBLISH") {
         Write-Host "Cancelled."
         exit 1
+    }
+}
+
+if (-not $DataDir) {
+    if ($Mode -eq "publish") {
+        $DataDir = ".\data\ready_to_publish"
+    } else {
+        $DataDir = ".\data\products"
     }
 }
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from .analyzer import ListingAnalyzer
 from .config import Settings
 from .ingest import discover_products
-from .models import ListingPlan
+from .models import ListingPlan, ProductInput
 from .marketplaces import FacebookMarketplaceAdapter, OLXAdapter
 from .models import PostResult
 
@@ -18,6 +18,29 @@ def _write_json(path: Path, payload: dict | list) -> None:
 
 def _load_listing(path: Path) -> ListingPlan:
     return ListingPlan(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def _path_exists(path_value: str) -> bool:
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.exists()
+
+
+def _repair_listing_image_paths(product: ProductInput, listing: ListingPlan) -> bool:
+    current_images = [str(path) for path in product.image_paths]
+    if not current_images:
+        return False
+
+    if listing.image_paths and all(_path_exists(path) for path in listing.image_paths):
+        return False
+
+    current_by_name = {Path(path).name: path for path in current_images}
+    cover_name = Path(listing.cover_image).name if listing.cover_image else ""
+
+    listing.image_paths = current_images
+    listing.cover_image = current_by_name.get(cover_name, current_images[0])
+    return True
 
 
 def run_pipeline(
@@ -61,6 +84,9 @@ def run_pipeline(
             if use_cached_listings and listing_path.exists():
                 listing = _load_listing(listing_path)
                 print(f"  - using cached listing: {listing_path}", flush=True)
+                if _repair_listing_image_paths(product, listing):
+                    _write_json(listing_path, listing.to_dict())
+                    print("  - repaired cached listing image paths for current product folder", flush=True)
             else:
                 listing = analyzer.analyze(product)
                 _write_json(listing_path, listing.to_dict())
