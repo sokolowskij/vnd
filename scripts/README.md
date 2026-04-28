@@ -80,6 +80,20 @@ docker compose logs -f backend
 
 ## Local Generation And Publishing
 
+On a fresh Windows PC, use this single local PowerShell command to sync approved AWS items,
+including photos, and then open the local browser publishing flow. This uses cached
+`listing_plan.json` files only and stops if any approved item has no generated listing.
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -InstallBrowsers
+```
+
+After Playwright Chromium has already been installed once:
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook
+```
+
 Use cached listing plans when available, then write dry-run posting results:
 
 ```powershell

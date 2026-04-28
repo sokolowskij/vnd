@@ -262,6 +262,20 @@ Then refresh Boss Review in the AWS app.
 
 Publishing can create real marketplace listings. Use `dry_run` until the reviewed payload looks correct.
 
+For a new Windows PC that should only publish already-approved AWS items, run this locally.
+It syncs `/app/data/ready_to_publish` from AWS, including photos, then starts publishing
+with cached `listing_plan.json` files. It does not generate listings.
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -InstallBrowsers
+```
+
+After Playwright Chromium has been installed once:
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook
+```
+
 For local browser-assisted publishing:
 
 ```powershell

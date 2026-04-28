@@ -228,6 +228,31 @@ The local copy lands here:
 C:\Users\jedre\Desktop\snn\data\server-products
 ```
 
+## New Windows PC: Publish Approved AWS Items Locally
+
+Use this when the item was already generated and approved in Boss Review, and the new PC only needs the photos plus cached listing data for local browser publishing.
+
+Run this in local Windows PowerShell, from the repo folder:
+
+```powershell
+cd C:\Users\jedre\Desktop\snn
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -InstallBrowsers
+```
+
+After Playwright Chromium has already been installed once:
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook
+```
+
+This syncs:
+
+```text
+AWS /app/data/ready_to_publish -> local .\data\ready_to_publish
+```
+
+It does not run generation. If any approved item has no `listing_plan.json`, the script stops instead of calling the model.
+
 ## What Worked
 
 - AWS app in Docker for uploads, Boss Review, deletes, downloads, approvals, and shared access.
@@ -457,4 +482,3 @@ And on AWS:
 cd /opt/vnd
 MODE=dry_run MARKETPLACES="facebook" ./scripts/run-local-pipeline.sh
 ```
-
