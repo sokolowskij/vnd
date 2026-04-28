@@ -112,6 +112,15 @@ Publish for real using cached listing plans when available:
 .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook
 ```
 
+Publish mode prints a final `x/x item(s) published` summary. Type the number before `/`
+when prompted to confirm the count.
+
+Open the saved marketplace browser profile for login only, without posting:
+
+```powershell
+.\scripts\run-local-pipeline.ps1 -AuthMode -Marketplaces facebook
+```
+
 Publish for real after recalculating listing plans:
 
 ```powershell

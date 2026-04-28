@@ -276,6 +276,15 @@ After Playwright Chromium has been installed once:
 .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook
 ```
 
+To log in to a marketplace browser profile only, without syncing or posting:
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -AuthMode -Marketplaces facebook
+```
+
+Publish mode prints a final `x/x item(s) published` summary. Type the number before `/`
+when prompted to confirm that the count is correct.
+
 For local browser-assisted publishing:
 
 ```powershell

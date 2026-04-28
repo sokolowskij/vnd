@@ -15,6 +15,7 @@
 #   LM_STUDIO_TUNNEL_PORT=1234
 #   REBUILD=1
 #   USE_PROD_COMPOSE=1
+#   AUTH_MODE=1
 
 set -euo pipefail
 
@@ -27,6 +28,7 @@ DATA_DIR="${DATA_DIR:-/app/data/products}"
 LM_STUDIO_TUNNEL_PORT="${LM_STUDIO_TUNNEL_PORT:-1234}"
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 REBUILD="${REBUILD:-0}"
+AUTH_MODE="${AUTH_MODE:-0}"
 
 cd "$DEPLOY_DIR"
 
@@ -88,6 +90,17 @@ echo "  Mode:          $MODE"
 echo "  Marketplaces:  $MARKETPLACES"
 echo "  Model API:     $LOCAL_MODEL_API"
 
+cli_args=(
+  python -m agentic_seller.cli
+  --data-dir "$DATA_DIR"
+  --mode "$MODE"
+  --marketplaces "${marketplace_args[@]}"
+)
+
+if [[ "$AUTH_MODE" == "1" ]]; then
+  cli_args+=(--auth-mode)
+fi
+
 docker run --rm \
   --network host \
   --volumes-from "$backend_container" \
@@ -101,7 +114,4 @@ docker run --rm \
   -e ENABLE_FACEBOOK="${ENABLE_FACEBOOK:-true}" \
   -e USER_DATA_DIR="${USER_DATA_DIR:-/app/data/browser_profiles}" \
   "$backend_image" \
-  python -m agentic_seller.cli \
-    --data-dir "$DATA_DIR" \
-    --mode "$MODE" \
-    --marketplaces "${marketplace_args[@]}"
+  "${cli_args[@]}"

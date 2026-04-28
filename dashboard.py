@@ -17,6 +17,7 @@ st.set_page_config(page_title="Agentic Seller", layout="wide")
 API_URL = os.getenv("API_URL", "http://backend:8000")
 SHOP_OPTIONS = ["", "KC", "FW", "KEN", "MAG"]
 PACKAGE_SIZE_OPTIONS = ["small", "medium", "large"]
+DEFAULT_MARKETPLACES = ["facebook", "olx", "vinted"]
 FACT_FIELDS = [
     ("brand", "Brand"),
     ("maker", "Maker"),
@@ -334,6 +335,51 @@ def reopen_product(product: dict) -> None:
     api_post(f"/products/{quote(product['product_id'])}/reopen")
 
 
+def marketplace_label(name: str) -> str:
+    labels = {"facebook": "Facebook", "olx": "OLX", "vinted": "Vinted"}
+    return labels.get(name, name.replace("_", " ").title())
+
+
+def marketplace_names(products: list[dict]) -> list[str]:
+    names = list(DEFAULT_MARKETPLACES)
+    for product in products:
+        for name in (product.get("marketplaces") or {}).keys():
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def marketplace_listed(product: dict, marketplace: str) -> bool:
+    status = (product.get("marketplaces") or {}).get(marketplace) or {}
+    return bool(status.get("listed"))
+
+
+def update_product_marketplace(product: dict, marketplace: str, listed: bool, url: str = "", notes: str = "") -> None:
+    api_put(
+        f"/products/{quote(product['product_id'])}/marketplaces/{quote(marketplace, safe='')}",
+        json={"listed": listed, "url": url, "notes": notes},
+    )
+
+
+def reviewed_marketplace_table(products: list[dict]) -> None:
+    if not products:
+        st.info("No reviewed items yet.")
+        return
+
+    names = marketplace_names(products)
+    rows = []
+    for product in products:
+        row = {
+            "Item": product.get("title") or product["product_id"],
+            "Price": format_price(product),
+            "Status": product_badge(product["status"]),
+        }
+        for name in names:
+            row[marketplace_label(name)] = "Yes" if marketplace_listed(product, name) else "No"
+        rows.append(row)
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def show_product_actions(product: dict, key_prefix: str) -> None:
     if current_user()["role"] != "boss":
         return
@@ -397,6 +443,50 @@ def show_product_details(product: dict, key_prefix: str) -> None:
         st.caption(" | ".join(facts))
     if product.get("llm_notes"):
         st.caption(f"LLM notes: {product['llm_notes']}")
+
+    with st.expander("Marketplace presence"):
+        marketplaces = product.get("marketplaces") or {}
+        for name in marketplace_names([product]):
+            current = marketplaces.get(name) or {}
+            with st.form(f"{key_prefix}_marketplace_{name}"):
+                cols = st.columns([1, 1, 2])
+                listed = cols[0].checkbox(
+                    marketplace_label(name),
+                    value=bool(current.get("listed")),
+                    key=f"{key_prefix}_{name}_listed",
+                )
+                url = cols[1].text_input(
+                    "URL",
+                    value=current.get("url") or "",
+                    key=f"{key_prefix}_{name}_url",
+                )
+                notes = cols[2].text_input(
+                    "Notes",
+                    value=current.get("notes") or "",
+                    key=f"{key_prefix}_{name}_notes",
+                )
+                if st.form_submit_button(f"Save {marketplace_label(name)}"):
+                    try:
+                        update_product_marketplace(product, name, listed, url, notes)
+                    except requests.exceptions.RequestException as exc:
+                        st.error(f"Marketplace update failed: {api_error_message(exc)}")
+                    else:
+                        st.success("Marketplace status saved.")
+                        st.rerun()
+
+        with st.form(f"{key_prefix}_add_marketplace"):
+            custom_name = st.text_input("Add marketplace")
+            custom_listed = st.checkbox("Listed there", value=True)
+            custom_url = st.text_input("Listing URL")
+            custom_notes = st.text_input("Marketplace notes")
+            if st.form_submit_button("Add marketplace"):
+                try:
+                    update_product_marketplace(product, custom_name, custom_listed, custom_url, custom_notes)
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Marketplace update failed: {api_error_message(exc)}")
+                else:
+                    st.success("Marketplace added.")
+                    st.rerun()
 
     description = listing.get("description", "")
     if description:
@@ -522,6 +612,8 @@ def items_page() -> None:
     with tab_pending:
         product_table(pending, "pending")
     with tab_ready:
+        st.subheader("Reviewed items")
+        reviewed_marketplace_table(ready)
         product_table(ready, "ready")
 
 

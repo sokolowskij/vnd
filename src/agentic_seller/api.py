@@ -32,6 +32,7 @@ ALLOWED_UPLOAD_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".txt", ".md", ".docx"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 SHOP_OPTIONS = {"KC", "FW", "KEN", "MAG"}
 PACKAGE_SIZE_OPTIONS = {"small", "medium", "large"}
+DEFAULT_MARKETPLACES = ["facebook", "olx", "vinted"]
 PENDING_RETENTION_DAYS = int(os.getenv("PENDING_RETENTION_DAYS", "90"))
 READY_RETENTION_DAYS = int(os.getenv("READY_RETENTION_DAYS", "30"))
 RETENTION_CHECK_HOURS = int(os.getenv("RETENTION_CHECK_HOURS", "24"))
@@ -95,6 +96,12 @@ class ProductMetadataUpdate(BaseModel):
     color: str | None = None
     dimensions: str | None = None
     llm_notes: str | None = None
+
+
+class MarketplaceStatusUpdate(BaseModel):
+    listed: bool = True
+    url: str | None = None
+    notes: str | None = None
 
 
 class UploadResponse(BaseModel):
@@ -405,6 +412,69 @@ def _write_status(product_dir: Path, updates: dict[str, Any]) -> None:
     _write_json(product_dir / "review_status.json", status)
 
 
+def _marketplace_key(value: str) -> str:
+    key = re.sub(r"[^a-z0-9._ -]+", "", value.strip().lower())
+    key = re.sub(r"\s+", "_", key)
+    if not key:
+        raise HTTPException(status_code=400, detail="Marketplace name cannot be empty")
+    return key[:50]
+
+
+def _marketplace_label(key: str) -> str:
+    known = {"facebook": "Facebook", "olx": "OLX", "vinted": "Vinted"}
+    return known.get(key, key.replace("_", " ").title())
+
+
+def _read_posted_marketplaces(product_dir: Path) -> dict[str, dict[str, Any]]:
+    posted: dict[str, dict[str, Any]] = {}
+    result_path = product_dir / "post_results.json"
+    if not result_path.exists():
+        return posted
+    results = _read_json(result_path, [])
+    if not isinstance(results, list):
+        return posted
+    for result in results:
+        if not isinstance(result, dict) or not result.get("success"):
+            continue
+        marketplace = result.get("marketplace")
+        if not marketplace:
+            continue
+        key = _marketplace_key(str(marketplace))
+        posted[key] = {
+            "listed": True,
+            "url": result.get("url"),
+            "notes": result.get("message"),
+            "source": "post_results",
+        }
+    return posted
+
+
+def _marketplaces_for(product_dir: Path) -> dict[str, dict[str, Any]]:
+    status = _status_for(product_dir)
+    stored = status.get("marketplaces") if isinstance(status.get("marketplaces"), dict) else {}
+    marketplaces: dict[str, dict[str, Any]] = {}
+    for key in DEFAULT_MARKETPLACES:
+        marketplaces[key] = {"listed": False, "label": _marketplace_label(key), "url": None, "notes": None}
+    for key, value in _read_posted_marketplaces(product_dir).items():
+        marketplaces.setdefault(key, {"listed": False, "label": _marketplace_label(key), "url": None, "notes": None})
+        marketplaces[key].update(value)
+    for raw_key, raw_value in stored.items():
+        key = _marketplace_key(str(raw_key))
+        value = raw_value if isinstance(raw_value, dict) else {"listed": bool(raw_value)}
+        marketplaces.setdefault(key, {"listed": False, "label": _marketplace_label(key), "url": None, "notes": None})
+        marketplaces[key].update(
+            {
+                "listed": bool(value.get("listed")),
+                "label": str(value.get("label") or _marketplace_label(key)),
+                "url": value.get("url"),
+                "notes": value.get("notes"),
+                "updated_at": value.get("updated_at"),
+                "source": value.get("source", "manual"),
+            }
+        )
+    return marketplaces
+
+
 def _validate_metadata(shop: str | None, package_size: str | None) -> None:
     if shop and shop not in SHOP_OPTIONS:
         raise HTTPException(status_code=400, detail=f"Shop must be one of: {', '.join(sorted(SHOP_OPTIONS))}")
@@ -477,6 +547,7 @@ def _product_summary(product_dir: Path) -> dict[str, Any]:
         "color": status_meta.get("color"),
         "dimensions": status_meta.get("dimensions"),
         "llm_notes": status_meta.get("llm_notes"),
+        "marketplaces": _marketplaces_for(product_dir),
         "image_rotations": status_meta.get("image_rotations", {}),
     }
 
@@ -926,6 +997,30 @@ async def update_product_metadata(
             update.llm_notes,
         ),
     )
+    return _product_summary(product_dir)
+
+
+@app.put("/products/{product_id}/marketplaces/{marketplace}")
+async def update_product_marketplace(
+    product_id: str,
+    marketplace: str,
+    update: MarketplaceStatusUpdate,
+    user: dict[str, str] = Depends(boss_user),
+):
+    product_dir = _product_path(product_id)
+    key = _marketplace_key(marketplace)
+    status = _status_for(product_dir)
+    marketplaces = status.get("marketplaces") if isinstance(status.get("marketplaces"), dict) else {}
+    marketplaces[key] = {
+        "listed": update.listed,
+        "label": _marketplace_label(key),
+        "url": update.url.strip() if update.url and update.url.strip() else None,
+        "notes": update.notes.strip() if update.notes and update.notes.strip() else None,
+        "source": "manual",
+        "updated_by": user["username"],
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    _write_status(product_dir, {"marketplaces": marketplaces})
     return _product_summary(product_dir)
 
 

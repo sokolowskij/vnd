@@ -245,6 +245,12 @@ After Playwright Chromium has already been installed once:
 .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook
 ```
 
+To log in to Facebook without syncing or posting:
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -AuthMode -Marketplaces facebook
+```
+
 This syncs:
 
 ```text
@@ -252,6 +258,7 @@ AWS /app/data/ready_to_publish -> local .\data\ready_to_publish
 ```
 
 It does not run generation. If any approved item has no `listing_plan.json`, the script stops instead of calling the model.
+After publishing, the local runner prints an `x/x item(s) published` summary. Type the number before `/` to confirm the count.
 
 ## What Worked
 

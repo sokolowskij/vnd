@@ -9,6 +9,16 @@ from .base import MarketplaceAdapter
 class OLXAdapter(MarketplaceAdapter):
     name = "olx"
 
+    def authenticate(self, context: Any) -> None:
+        page = context.new_page()
+        try:
+            page.goto("https://www.olx.pl/", wait_until="domcontentloaded")
+            print("  [AUTH] OLX opened. Log in if needed, then close the page to continue.", flush=True)
+            page.wait_for_event("close", timeout=0)
+        finally:
+            if not page.is_closed():
+                page.close()
+
     def post(self, context: Any, listing: ListingPlan, mode: str) -> PostResult:
         if mode == "dry_run":
             return PostResult(

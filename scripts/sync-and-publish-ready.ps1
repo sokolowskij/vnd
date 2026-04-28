@@ -7,6 +7,7 @@ Every synced product must already contain listing_plan.json, otherwise the scrip
 Examples:
   .\scripts\sync-and-publish-ready.ps1
   .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -InstallBrowsers
+  .\scripts\sync-and-publish-ready.ps1 -AuthMode -Marketplaces facebook
   .\scripts\sync-and-publish-ready.ps1 -UseProdCompose -Yes
 #>
 
@@ -20,6 +21,7 @@ param(
     [switch]$UseProdCompose,
     [switch]$InstallBrowsers,
     [switch]$SkipDependencyInstall,
+    [switch]$AuthMode,
     [switch]$Yes,
     [switch]$KeepArchive
 )
@@ -28,10 +30,6 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
-
-if (-not (Test-Path $Key)) {
-    throw "SSH key not found: $Key"
-}
 
 $Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
@@ -61,6 +59,27 @@ if (-not (Test-Path ".env")) {
         New-Item -ItemType File -Path ".env" | Out-Null
         Write-Host "Created empty .env."
     }
+}
+
+if ($AuthMode) {
+    Write-Host "Auth mode: opening marketplace browser profiles only. No AWS sync and no publishing."
+    $AuthArgs = @(
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".\scripts\run-local-pipeline.ps1",
+        "-AuthMode",
+        "-Marketplaces"
+    ) + $Marketplaces
+    & powershell @AuthArgs
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    exit 0
+}
+
+if (-not (Test-Path $Key)) {
+    throw "SSH key not found: $Key"
 }
 
 $Compose = "docker compose"

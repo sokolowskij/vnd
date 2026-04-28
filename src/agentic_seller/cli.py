@@ -19,13 +19,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--marketplaces",
         nargs="+",
-        default=["olx", "facebook", "ceneo"],
-        help="Marketplaces to run: olx facebook ceneo",
+        default=["olx", "facebook"],
+        help="Marketplaces to run: olx facebook",
     )
     parser.add_argument(
         "--use-cached-listings",
         action="store_true",
         help="Use existing listing_plan.json files when present instead of recalculating descriptions.",
+    )
+    parser.add_argument(
+        "--auth-mode",
+        action="store_true",
+        help="Open persistent marketplace browser profiles for login only; do not process or publish items.",
     )
     return parser.parse_args()
 
@@ -40,6 +45,7 @@ def main() -> None:
         mode=mode,
         selected_marketplaces=args.marketplaces,
         use_cached_listings=args.use_cached_listings,
+        auth_mode=args.auth_mode,
     )
 
 

@@ -8,12 +8,15 @@ Examples:
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -Recalculate
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces olx,facebook -Yes
+  .\scripts\run-local-pipeline.ps1 -AuthMode -Marketplaces facebook
 
 Notes:
   - By default, existing listing_plan.json files are reused as cached data.
   - Use -Recalculate to regenerate listing_plan.json before posting.
   - dry_run writes post_results.json without submitting listings.
   - publish opens/uses marketplace browser automation and may post real listings.
+  - AuthMode opens marketplace browser profiles for login only and does not post.
+  - publish asks for a final published-count confirmation after browser flows complete.
   - Configure .env first. For LM Studio, keep the local server running.
 #>
 
@@ -25,7 +28,8 @@ param(
     [string[]]$Marketplaces = @("olx", "facebook"),
     [switch]$Recalculate,
     [switch]$Yes,
-    [switch]$InstallBrowsers
+    [switch]$InstallBrowsers,
+    [switch]$AuthMode
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,7 +50,7 @@ if ($InstallBrowsers) {
     & $Python -m playwright install chromium
 }
 
-if ($Mode -eq "publish" -and -not $Yes) {
+if ($Mode -eq "publish" -and -not $Yes -and -not $AuthMode) {
     Write-Host "Publish mode may create real marketplace listings."
     $answer = Read-Host "Type PUBLISH to continue"
     if ($answer -ne "PUBLISH") {
@@ -56,7 +60,9 @@ if ($Mode -eq "publish" -and -not $Yes) {
 }
 
 if (-not $DataDir) {
-    if ($Mode -eq "publish") {
+    if ($AuthMode) {
+        $DataDir = "."
+    } elseif ($Mode -eq "publish") {
         $DataDir = ".\data\ready_to_publish"
     } else {
         $DataDir = ".\data\products"
@@ -88,6 +94,10 @@ $CliArgs = @(
 
 if (-not $Recalculate) {
     $CliArgs += "--use-cached-listings"
+}
+
+if ($AuthMode) {
+    $CliArgs += "--auth-mode"
 }
 
 & $Python @CliArgs

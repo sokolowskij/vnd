@@ -8,12 +8,15 @@
 #   ./scripts/run-local-pipeline.sh -Mode publish -Marketplaces facebook
 #   ./scripts/run-local-pipeline.sh -Mode publish -Marketplaces facebook -Recalculate
 #   ./scripts/run-local-pipeline.sh -Mode publish -Marketplaces olx,facebook -Yes
+#   ./scripts/run-local-pipeline.sh -AuthMode -Marketplaces facebook
 #
 # Notes:
 #   - By default, existing listing_plan.json files are reused as cached data.
 #   - Use -Recalculate to regenerate listing_plan.json before posting.
 #   - dry_run writes post_results.json without submitting listings.
 #   - publish opens/uses marketplace browser automation and may post real listings.
+#   - AuthMode opens marketplace browser profiles for login only and does not post.
+#   - publish asks for a final published-count confirmation after browser flows complete.
 #   - On AWS, if ./data/products does not exist but the backend container is
 #     running, this script processes /app/data/products from the Docker volume.
 
@@ -29,6 +32,7 @@ MARKETPLACES=("olx" "facebook")
 RECALCULATE=0
 YES=0
 INSTALL_BROWSERS=0
+AUTH_MODE=0
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 REBUILD="${REBUILD:-0}"
 
@@ -177,6 +181,10 @@ while [[ $# -gt 0 ]]; do
       INSTALL_BROWSERS=1
       shift
       ;;
+    -AuthMode|--auth-mode)
+      AUTH_MODE=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -213,7 +221,7 @@ if [[ "$INSTALL_BROWSERS" == "1" ]]; then
   "$PYTHON" -m playwright install chromium
 fi
 
-if [[ "$MODE" == "publish" && "$YES" != "1" ]]; then
+if [[ "$MODE" == "publish" && "$YES" != "1" && "$AUTH_MODE" != "1" ]]; then
   echo "Publish mode may create real marketplace listings."
   read -r -p "Type PUBLISH to continue: " answer
   if [[ "$answer" != "PUBLISH" ]]; then
@@ -222,7 +230,9 @@ if [[ "$MODE" == "publish" && "$YES" != "1" ]]; then
   fi
 fi
 
-if [[ ! -d "$DATA_DIR" ]]; then
+if [[ "$AUTH_MODE" == "1" ]]; then
+  DATA_DIR="$REPO_ROOT"
+elif [[ ! -d "$DATA_DIR" ]]; then
   if command -v docker >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
     run_in_backend_data_container
     exit 0
@@ -260,6 +270,10 @@ if [[ "$RECALCULATE" != "1" ]]; then
   if "$PYTHON" -m agentic_seller.cli --help | grep -q -- "--use-cached-listings"; then
     CLI_ARGS+=(--use-cached-listings)
   fi
+fi
+
+if [[ "$AUTH_MODE" == "1" ]]; then
+  CLI_ARGS+=(--auth-mode)
 fi
 
 PYTHONUNBUFFERED=1 "$PYTHON" -u "${CLI_ARGS[@]}"
