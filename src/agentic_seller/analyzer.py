@@ -86,6 +86,9 @@ class ListingAnalyzer:
     def _fallback_plan(self, product: ProductInput) -> ListingPlan:
         title = product.product_id
         desc_parts = [f"Automatycznie wygenerowana oferta: {product.product_id}."]
+        if product.facts:
+            facts_text = "\n".join(f"{key}: {value}" for key, value in product.facts.items())
+            desc_parts.append(f"Fakty o produkcie:\n{facts_text}")
         if product.optional_text:
             desc_parts.append(product.optional_text)
 
@@ -144,6 +147,8 @@ class ListingAnalyzer:
 
             prompt = (
                 "Przeanalizuj produkt ze zdjęć i opcjonalnego opisu.\n"
+                "Jeśli podano fakty o produkcie, traktuj je jako ważniejsze niż zgadywanie ze zdjęć. "
+                "Użyj ich w opisie, ale nie dopisuj niepotwierdzonych szczegółów.\n"
                 "Zwróć WYŁĄCZNIE JSON z polami:\n"
                 "- title (max 100 znaków)\n"
                 "- description (szczegółowy opis sprzedażowy, postaraj się zeby był precyzyjny, bez 'lania wody')\n"
@@ -154,6 +159,9 @@ class ListingAnalyzer:
                 "- cover_image_index (number)\n"
                 "Opis ma być sprzedażowy po polsku, zachęcający, bez halucynacji."
             )
+            if product.facts:
+                facts_text = "\n".join(f"- {key}: {value}" for key, value in product.facts.items())
+                prompt += f"\n\nFakty podane przy uploadzie:\n{facts_text}"
             if product.optional_text:
                 prompt += f"\n\nOpis użytkownika:\n{product.optional_text}"
 

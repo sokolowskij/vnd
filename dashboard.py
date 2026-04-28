@@ -17,6 +17,14 @@ st.set_page_config(page_title="Agentic Seller", layout="wide")
 API_URL = os.getenv("API_URL", "http://backend:8000")
 SHOP_OPTIONS = ["", "KC", "FW", "KEN", "MAG"]
 PACKAGE_SIZE_OPTIONS = ["small", "medium", "large"]
+FACT_FIELDS = [
+    ("brand", "Brand"),
+    ("maker", "Maker"),
+    ("model", "Model"),
+    ("material", "Material"),
+    ("color", "Color"),
+    ("dimensions", "Dimensions"),
+]
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "agentic_seller_session")
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 SESSION_MAX_AGE_SECONDS = SESSION_TTL_DAYS * 24 * 60 * 60
@@ -321,11 +329,25 @@ def delete_product(product: dict) -> None:
     api_delete(f"/products/{quote(product['product_id'])}")
 
 
+def reopen_product(product: dict) -> None:
+    api_post(f"/products/{quote(product['product_id'])}/reopen")
+
+
 def show_product_actions(product: dict, key_prefix: str) -> None:
     if current_user()["role"] != "boss":
         return
 
     with st.expander("Product actions"):
+        if product.get("status") == "ready_to_publish":
+            if st.button("Send back to review", key=f"{key_prefix}_reopen"):
+                try:
+                    reopen_product(product)
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Could not send back: {api_error_message(exc)}")
+                else:
+                    st.success("Moved back to awaiting review.")
+                    st.rerun()
+
         download_key = f"{key_prefix}_download_data"
         if st.button("Prepare download", key=f"{key_prefix}_prepare_download"):
             try:
@@ -368,6 +390,12 @@ def show_product_details(product: dict, key_prefix: str) -> None:
 
     if product.get("approved_by"):
         st.caption(f"Approved by {product['approved_by']}")
+
+    facts = [f"{label}: {product.get(field)}" for field, label in FACT_FIELDS if product.get(field)]
+    if facts:
+        st.caption(" | ".join(facts))
+    if product.get("llm_notes"):
+        st.caption(f"LLM notes: {product['llm_notes']}")
 
     description = listing.get("description", "")
     if description:
@@ -425,7 +453,13 @@ def upload_page() -> None:
                 PACKAGE_SIZE_OPTIONS,
                 index=option_index(PACKAGE_SIZE_OPTIONS, "medium"),
             )
-            notes = st.text_area("Notes", height=120)
+            st.write("Product facts")
+            fact_cols = st.columns(3)
+            upload_facts = {}
+            for index, (field, label) in enumerate(FACT_FIELDS):
+                upload_facts[field] = fact_cols[index % len(fact_cols)].text_input(label)
+            notes = st.text_area("Notes from documents or seller", height=90)
+            llm_notes = st.text_area("Additional notes for LLM agent", height=90)
             files = st.file_uploader(
                 "Photos and documents",
                 type=["jpg", "jpeg", "png", "webp", "txt", "md", "docx"],
@@ -456,6 +490,8 @@ def upload_page() -> None:
                         "added_by": current_user()["username"],
                         "shop": shop,
                         "package_size": package_size,
+                        "llm_notes": llm_notes,
+                        **upload_facts,
                     },
                     files=multipart_files,
                 )
@@ -497,12 +533,11 @@ def review_page() -> None:
         st.error(f"Could not load items: {exc}")
         return
 
-    reviewable = [p for p in products if p["status"] != "ready_to_publish"]
-    if not reviewable:
-        st.info("No items waiting for review.")
+    if not products:
+        st.info("No items available.")
         return
 
-    options = {f"{p['title']} ({product_badge(p['status'])})": p["product_id"] for p in reviewable}
+    options = {f"{p['title']} ({product_badge(p['status'])})": p["product_id"] for p in products}
     selected_label = st.selectbox("Item", list(options.keys()))
     product_id = options[selected_label]
 
@@ -551,13 +586,22 @@ def review_page() -> None:
             category = st.text_input("Category", value=listing.get("category", ""))
             condition = st.text_input("Condition", value=listing.get("condition", ""))
             description = st.text_area("Description", value=listing.get("description", ""), height=240)
-            attrs_text = st.text_area(
-                "Attributes JSON",
-                value=json.dumps(attributes, ensure_ascii=False, indent=2),
-                height=140,
+            st.write("Product facts")
+            fact_cols = st.columns(3)
+            fact_values = {}
+            for index, (field, label) in enumerate(FACT_FIELDS):
+                value = product.get(field) or attributes.get(field) or ""
+                fact_values[field] = fact_cols[index % len(fact_cols)].text_input(label, value=str(value))
+            llm_notes = st.text_area(
+                "Additional notes for LLM agent",
+                value=product.get("llm_notes") or "",
+                height=90,
             )
-            cover_options = image_paths or [str(product["product_dir"] + "/" + name) for name in product.get("images", [])]
-            cover_index = cover_options.index(current_cover) if current_cover in cover_options else 0
+            product_image_paths = [str(Path(product["product_dir"]) / name) for name in product.get("images", [])]
+            cover_options = product_image_paths or image_paths
+            current_cover_name = Path(current_cover).name if current_cover else ""
+            cover_names = [Path(path).name for path in cover_options]
+            cover_index = cover_names.index(current_cover_name) if current_cover_name in cover_names else 0
             cover_image = (
                 st.selectbox("Cover image", cover_options, index=cover_index, format_func=lambda path: Path(path).name)
                 if cover_options
@@ -567,38 +611,50 @@ def review_page() -> None:
             save_clicked = st.form_submit_button("Save Changes")
 
         if save_clicked:
+            parsed_attrs = {
+                key: value
+                for key, value in attributes.items()
+                if key not in {field for field, _ in FACT_FIELDS}
+            }
+            parsed_attrs.update({key: value.strip() for key, value in fact_values.items() if value.strip()})
+            payload = {
+                "title": title,
+                "description": description,
+                "price": price,
+                "currency": currency,
+                "category": category,
+                "condition": condition,
+                "attributes": parsed_attrs,
+                "cover_image": cover_image,
+            }
             try:
-                parsed_attrs = json.loads(attrs_text) if attrs_text.strip() else {}
-            except json.JSONDecodeError as exc:
-                st.error(f"Attributes must be valid JSON: {exc}")
+                api_put(f"/products/{quote(product_id)}/listing", json=payload)
+                api_put(
+                    f"/products/{quote(product_id)}/metadata",
+                    json={
+                        "shop": shop or None,
+                        "package_size": package_size,
+                        "actual_store_shelf_price": actual_store_shelf_price,
+                        "llm_notes": llm_notes,
+                        **fact_values,
+                    },
+                )
+            except requests.exceptions.RequestException as exc:
+                st.error(f"Save failed: {api_error_message(exc)}")
             else:
-                payload = {
-                    "title": title,
-                    "description": description,
-                    "price": price,
-                    "currency": currency,
-                    "category": category,
-                    "condition": condition,
-                    "attributes": parsed_attrs,
-                    "cover_image": cover_image,
-                }
-                try:
-                    api_put(f"/products/{quote(product_id)}/listing", json=payload)
-                    api_put(
-                        f"/products/{quote(product_id)}/metadata",
-                        json={
-                            "shop": shop or None,
-                            "package_size": package_size,
-                            "actual_store_shelf_price": actual_store_shelf_price,
-                        },
-                    )
-                except requests.exceptions.RequestException as exc:
-                    st.error(f"Save failed: {api_error_message(exc)}")
-                else:
-                    st.success("Saved.")
-                    st.rerun()
+                st.success("Saved.")
+                st.rerun()
 
-        if listing and st.button("Approve For Publishing", type="primary"):
+        if product["status"] == "ready_to_publish":
+            if st.button("Send back to review"):
+                try:
+                    reopen_product(product)
+                except requests.exceptions.RequestException as exc:
+                    st.error(f"Could not send back: {api_error_message(exc)}")
+                else:
+                    st.success("Moved back to awaiting review.")
+                    st.rerun()
+        elif listing and st.button("Approve For Publishing", type="primary"):
             try:
                 api_post(f"/products/{quote(product_id)}/approve", data={"username": current_user()["username"]})
             except requests.exceptions.RequestException as exc:

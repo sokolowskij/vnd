@@ -87,6 +87,13 @@ class ProductMetadataUpdate(BaseModel):
     shop: str | None = None
     package_size: str | None = None
     actual_store_shelf_price: float | None = None
+    brand: str | None = None
+    maker: str | None = None
+    model: str | None = None
+    material: str | None = None
+    color: str | None = None
+    dimensions: str | None = None
+    llm_notes: str | None = None
 
 
 class UploadResponse(BaseModel):
@@ -355,6 +362,37 @@ def _listing_for(product_dir: Path) -> dict[str, Any] | None:
     return _read_json(listing_path, None)
 
 
+def _path_exists(path_value: str) -> bool:
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.exists()
+
+
+def _current_image_paths(product_dir: Path) -> list[str]:
+    return [str(product_dir / name) for name in _list_images(product_dir)]
+
+
+def _repair_listing_image_paths(product_dir: Path) -> None:
+    listing = _listing_for(product_dir)
+    if not listing:
+        return
+
+    current_images = _current_image_paths(product_dir)
+    if not current_images:
+        return
+
+    listing_images = listing.get("image_paths") or []
+    if listing_images and all(_path_exists(str(path)) for path in listing_images):
+        return
+
+    cover_name = Path(str(listing.get("cover_image") or "")).name
+    current_by_name = {Path(path).name: path for path in current_images}
+    listing["image_paths"] = current_images
+    listing["cover_image"] = current_by_name.get(cover_name, current_images[0])
+    _write_json(product_dir / "listing_plan.json", listing)
+
+
 def _status_for(product_dir: Path) -> dict[str, Any]:
     return _read_json(product_dir / "review_status.json", {})
 
@@ -380,6 +418,13 @@ def _metadata_updates(
     shop: str | None,
     package_size: str | None,
     actual_store_shelf_price: float | None,
+    brand: str | None = None,
+    maker: str | None = None,
+    model: str | None = None,
+    material: str | None = None,
+    color: str | None = None,
+    dimensions: str | None = None,
+    llm_notes: str | None = None,
 ) -> dict[str, Any]:
     shop = shop or None
     package_size = package_size or None
@@ -388,6 +433,13 @@ def _metadata_updates(
         "shop": shop,
         "package_size": package_size,
         "actual_store_shelf_price": actual_store_shelf_price,
+        "brand": brand.strip() if brand and brand.strip() else None,
+        "maker": maker.strip() if maker and maker.strip() else None,
+        "model": model.strip() if model and model.strip() else None,
+        "material": material.strip() if material and material.strip() else None,
+        "color": color.strip() if color and color.strip() else None,
+        "dimensions": dimensions.strip() if dimensions and dimensions.strip() else None,
+        "llm_notes": llm_notes.strip() if llm_notes and llm_notes.strip() else None,
     }
 
 
@@ -414,6 +466,13 @@ def _product_summary(product_dir: Path) -> dict[str, Any]:
         "shop": status_meta.get("shop"),
         "package_size": status_meta.get("package_size"),
         "actual_store_shelf_price": status_meta.get("actual_store_shelf_price"),
+        "brand": status_meta.get("brand"),
+        "maker": status_meta.get("maker"),
+        "model": status_meta.get("model"),
+        "material": status_meta.get("material"),
+        "color": status_meta.get("color"),
+        "dimensions": status_meta.get("dimensions"),
+        "llm_notes": status_meta.get("llm_notes"),
         "image_rotations": status_meta.get("image_rotations", {}),
     }
 
@@ -708,6 +767,13 @@ async def upload_product(
     shop: str = Form(""),
     package_size: str = Form("medium"),
     actual_store_shelf_price: float | None = Form(None),
+    brand: str = Form(""),
+    maker: str = Form(""),
+    model: str = Form(""),
+    material: str = Form(""),
+    color: str = Form(""),
+    dimensions: str = Form(""),
+    llm_notes: str = Form(""),
     files: list[UploadFile] = File(...),
     user: dict[str, str] = Depends(current_user),
 ):
@@ -739,7 +805,18 @@ async def upload_product(
             "status": "awaiting_generation",
             "added_by": user["username"] or (_safe_name(added_by) if added_by.strip() else "unknown"),
             "uploaded_at": datetime.utcnow().isoformat(),
-            **_metadata_updates(shop, package_size, actual_store_shelf_price),
+            **_metadata_updates(
+                shop,
+                package_size,
+                actual_store_shelf_price,
+                brand,
+                maker,
+                model,
+                material,
+                color,
+                dimensions,
+                llm_notes,
+            ),
         },
     )
     return UploadResponse(product_id=product_id, product_dir=str(product_dir), saved_files=saved_files)
@@ -829,7 +906,18 @@ async def update_product_metadata(
     product_dir = _product_path(product_id)
     _write_status(
         product_dir,
-        _metadata_updates(update.shop, update.package_size, update.actual_store_shelf_price),
+        _metadata_updates(
+            update.shop,
+            update.package_size,
+            update.actual_store_shelf_price,
+            update.brand,
+            update.maker,
+            update.model,
+            update.material,
+            update.color,
+            update.dimensions,
+            update.llm_notes,
+        ),
     )
     return _product_summary(product_dir)
 
@@ -852,8 +940,12 @@ async def delete_product(product_id: str, _: dict[str, str] = Depends(boss_user)
 async def update_listing(product_id: str, update: ListingUpdate, _: dict[str, str] = Depends(boss_user)):
     product_dir = _product_path(product_id)
     current = _listing_for(product_dir) or {}
-    images = current.get("image_paths") or [str(product_dir / name) for name in _list_images(product_dir)]
+    current_images = current.get("image_paths") or []
+    images = current_images if current_images and all(_path_exists(str(path)) for path in current_images) else _current_image_paths(product_dir)
     cover_image = update.cover_image or current.get("cover_image") or (images[0] if images else None)
+    if cover_image and not _path_exists(str(cover_image)) and images:
+        by_name = {Path(path).name: path for path in images}
+        cover_image = by_name.get(Path(str(cover_image)).name, images[0])
 
     listing = {
         "product_id": product_dir.name,
@@ -895,5 +987,34 @@ async def approve_product(
         },
     )
     shutil.move(str(product_dir), str(destination))
+    _repair_listing_image_paths(destination)
     return _product_summary(destination)
-    
+
+
+@app.post("/products/{product_id}/reopen")
+async def reopen_product(
+    product_id: str,
+    user: dict[str, str] = Depends(boss_user),
+):
+    product_dir = _product_path(product_id, include_ready=True)
+    if product_dir.parent != ready_dir():
+        _write_status(product_dir, {"status": "awaiting_review"})
+        return _product_summary(product_dir)
+
+    destination = products_dir() / product_dir.name
+    if destination.exists():
+        destination = products_dir() / f"{product_dir.name}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+    _write_status(
+        product_dir,
+        {
+            "status": "awaiting_review",
+            "approved_by": None,
+            "approved_at": None,
+            "reopened_by": user["username"],
+            "reopened_at": datetime.utcnow().isoformat(),
+        },
+    )
+    shutil.move(str(product_dir), str(destination))
+    _repair_listing_image_paths(destination)
+    return _product_summary(destination)

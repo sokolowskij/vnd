@@ -11,6 +11,7 @@ class ProductInput:
     root_dir: Path
     image_paths: list[Path]
     optional_text: str | None = None
+    facts: dict[str, Any] | None = None
 
 
 @dataclass

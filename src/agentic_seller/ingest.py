@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from .models import ProductInput
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 _TEXT_EXTS = {".txt", ".md", ".docx"}
+_FACT_FIELDS = {
+    "brand": "Brand",
+    "maker": "Maker",
+    "model": "Model",
+    "material": "Material",
+    "color": "Color",
+    "dimensions": "Dimensions",
+    "llm_notes": "Additional notes",
+}
 
 
 def _read_optional_text(path: Path) -> str | None:
@@ -23,6 +34,26 @@ def _read_optional_text(path: Path) -> str | None:
         return text or None
 
     return None
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _product_facts(product_dir: Path) -> dict[str, str]:
+    status = _read_json(product_dir / "review_status.json")
+    facts: dict[str, str] = {}
+    for key, label in _FACT_FIELDS.items():
+        value = status.get(key)
+        if value is not None and str(value).strip():
+            facts[label] = str(value).strip()
+    return facts
 
 
 def discover_products(data_dir: Path) -> list[ProductInput]:
@@ -61,6 +92,7 @@ def discover_products(data_dir: Path) -> list[ProductInput]:
                 root_dir=selected_dir,
                 image_paths=selected_images,
                 optional_text=optional_text,
+                facts=_product_facts(selected_dir),
             )
         )
 
