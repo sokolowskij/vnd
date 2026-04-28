@@ -21,6 +21,7 @@ FACT_FIELDS = [
     ("brand", "Brand"),
     ("maker", "Maker"),
     ("model", "Model"),
+    ("year", "Year"),
     ("material", "Material"),
     ("color", "Color"),
     ("dimensions", "Dimensions"),
@@ -445,6 +446,11 @@ def upload_page() -> None:
 
     with left:
         with st.form("upload_product_form", clear_on_submit=True):
+            files = st.file_uploader(
+                "Photos and documents",
+                type=["jpg", "jpeg", "png", "webp", "txt", "md", "docx"],
+                accept_multiple_files=True,
+            )
             product_name = st.text_input("Item name")
             form_cols = st.columns(2)
             shop = form_cols[0].selectbox("Shop", SHOP_OPTIONS)
@@ -453,18 +459,13 @@ def upload_page() -> None:
                 PACKAGE_SIZE_OPTIONS,
                 index=option_index(PACKAGE_SIZE_OPTIONS, "medium"),
             )
-            st.write("Product facts")
+            st.write("Optional product facts")
             fact_cols = st.columns(3)
             upload_facts = {}
             for index, (field, label) in enumerate(FACT_FIELDS):
                 upload_facts[field] = fact_cols[index % len(fact_cols)].text_input(label)
-            notes = st.text_area("Notes from documents or seller", height=90)
-            llm_notes = st.text_area("Additional notes for LLM agent", height=90)
-            files = st.file_uploader(
-                "Photos and documents",
-                type=["jpg", "jpeg", "png", "webp", "txt", "md", "docx"],
-                accept_multiple_files=True,
-            )
+            notes = st.text_area("Optional notes from documents or seller", height=90)
+            llm_notes = st.text_area("Optional additional notes for LLM agent", height=90)
             submitted = st.form_submit_button("Upload")
 
     with right:

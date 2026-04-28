@@ -90,6 +90,7 @@ class ProductMetadataUpdate(BaseModel):
     brand: str | None = None
     maker: str | None = None
     model: str | None = None
+    year: str | None = None
     material: str | None = None
     color: str | None = None
     dimensions: str | None = None
@@ -421,6 +422,7 @@ def _metadata_updates(
     brand: str | None = None,
     maker: str | None = None,
     model: str | None = None,
+    year: str | None = None,
     material: str | None = None,
     color: str | None = None,
     dimensions: str | None = None,
@@ -436,6 +438,7 @@ def _metadata_updates(
         "brand": brand.strip() if brand and brand.strip() else None,
         "maker": maker.strip() if maker and maker.strip() else None,
         "model": model.strip() if model and model.strip() else None,
+        "year": year.strip() if year and year.strip() else None,
         "material": material.strip() if material and material.strip() else None,
         "color": color.strip() if color and color.strip() else None,
         "dimensions": dimensions.strip() if dimensions and dimensions.strip() else None,
@@ -469,6 +472,7 @@ def _product_summary(product_dir: Path) -> dict[str, Any]:
         "brand": status_meta.get("brand"),
         "maker": status_meta.get("maker"),
         "model": status_meta.get("model"),
+        "year": status_meta.get("year"),
         "material": status_meta.get("material"),
         "color": status_meta.get("color"),
         "dimensions": status_meta.get("dimensions"),
@@ -770,6 +774,7 @@ async def upload_product(
     brand: str = Form(""),
     maker: str = Form(""),
     model: str = Form(""),
+    year: str = Form(""),
     material: str = Form(""),
     color: str = Form(""),
     dimensions: str = Form(""),
@@ -812,6 +817,7 @@ async def upload_product(
                 brand,
                 maker,
                 model,
+                year,
                 material,
                 color,
                 dimensions,
@@ -913,6 +919,7 @@ async def update_product_metadata(
             update.brand,
             update.maker,
             update.model,
+            update.year,
             update.material,
             update.color,
             update.dimensions,

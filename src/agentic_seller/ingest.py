@@ -12,6 +12,7 @@ _FACT_FIELDS = {
     "brand": "Brand",
     "maker": "Maker",
     "model": "Model",
+    "year": "Year",
     "material": "Material",
     "color": "Color",
     "dimensions": "Dimensions",
