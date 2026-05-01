@@ -534,6 +534,7 @@ def _product_summary(product_dir: Path) -> dict[str, Any]:
         "condition": (listing or {}).get("condition"),
         "added_by": status_meta.get("added_by"),
         "uploaded_at": status_meta.get("uploaded_at"),
+        "item_added_at": status_meta.get("item_added_at") or status_meta.get("uploaded_at"),
         "approved_by": status_meta.get("approved_by"),
         "approved_at": status_meta.get("approved_at"),
         "shop": status_meta.get("shop"),
@@ -875,12 +876,14 @@ async def upload_product(
         (product_dir / "notes.txt").write_text(notes.strip(), encoding="utf-8")
         saved_files.append("notes.txt")
 
+    added_at = datetime.utcnow().isoformat()
     _write_status(
         product_dir,
         {
             "status": "awaiting_generation",
             "added_by": user["username"] or (_safe_name(added_by) if added_by.strip() else "unknown"),
-            "uploaded_at": datetime.utcnow().isoformat(),
+            "uploaded_at": added_at,
+            "item_added_at": added_at,
             **_metadata_updates(
                 shop,
                 package_size,
