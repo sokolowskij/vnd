@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .config import load_settings
+from .models import PublishOptions
 from .orchestrator import run_pipeline
 
 
@@ -32,6 +33,21 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Open persistent marketplace browser profiles for login only; do not process or publish items.",
     )
+    parser.add_argument(
+        "--auto-publish",
+        action="store_true",
+        help="Attempt to click the final marketplace publish button after filling the form.",
+    )
+    parser.add_argument(
+        "--publishing-email",
+        default=None,
+        help="Email address to fill into marketplace forms when available.",
+    )
+    parser.add_argument(
+        "--publish-location",
+        default="Warsaw, Poland",
+        help="City/location value to fill into marketplace forms.",
+    )
     return parser.parse_args()
 
 
@@ -46,6 +62,11 @@ def main() -> None:
         selected_marketplaces=args.marketplaces,
         use_cached_listings=args.use_cached_listings,
         auth_mode=args.auth_mode,
+        publish_options=PublishOptions(
+            auto_publish=args.auto_publish,
+            contact_email=args.publishing_email,
+            location=args.publish_location,
+        ),
     )
 
 

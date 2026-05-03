@@ -10,7 +10,7 @@ from .config import Settings
 from .ingest import discover_products
 from .models import ListingPlan, ProductInput
 from .marketplaces import FacebookMarketplaceAdapter, OLXAdapter
-from .models import PostResult
+from .models import PostResult, PublishOptions
 
 
 def _write_json(path: Path, payload: dict | list) -> None:
@@ -84,7 +84,9 @@ def run_pipeline(
     selected_marketplaces: list[str],
     use_cached_listings: bool = False,
     auth_mode: bool = False,
+    publish_options: PublishOptions | None = None,
 ) -> None:
+    publish_options = publish_options or PublishOptions()
     user_data_base = Path(settings.user_data_dir).resolve()
     user_data_base.mkdir(parents=True, exist_ok=True)
 
@@ -162,7 +164,7 @@ def run_pipeline(
                     )
 
                 try:
-                    result = adapters[name].post(browser_context, listing, mode)
+                    result = adapters[name].post(browser_context, listing, mode, publish_options)
                     results.append(result)
                     _write_marketplace_status(product.root_dir, result)
                     print(f"  - {name}: {'OK' if result.success else 'FAIL'} | {result.message}", flush=True)

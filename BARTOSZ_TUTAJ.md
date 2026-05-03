@@ -251,6 +251,18 @@ To log in to Facebook without syncing or posting:
 .\scripts\sync-and-publish-ready.ps1 -AuthMode -Marketplaces facebook
 ```
 
+To let the publishing helper click the final publish button automatically, use:
+
+```powershell
+.\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -AutoPublish
+```
+
+The script asks for an email address and fills the city/location field as:
+
+```text
+Warsaw, Poland
+```
+
 This syncs:
 
 ```text

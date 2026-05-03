@@ -291,6 +291,19 @@ For local browser-assisted publishing:
 .\scripts\run-local-pipeline.ps1 -DataDir .\data\server-products -Mode publish -Marketplaces facebook
 ```
 
+To let the script attempt the final marketplace publish click after filling the form, use `-AutoPublish`.
+The script prompts for an email address and always fills the location as `Warsaw, Poland`.
+
+```powershell
+.\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -AutoPublish
+```
+
+Dry-run the auto-publish payload without opening a browser or publishing:
+
+```powershell
+.\scripts\run-local-pipeline.ps1 -Mode dry_run -DataDir .\data\ready_to_publish -Marketplaces facebook -AutoPublish -PublishingEmail you@example.com
+```
+
 Skip the confirmation prompt only when you are sure:
 
 ```powershell

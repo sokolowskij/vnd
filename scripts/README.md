@@ -121,6 +121,19 @@ Open the saved marketplace browser profile for login only, without posting:
 .\scripts\run-local-pipeline.ps1 -AuthMode -Marketplaces facebook
 ```
 
+Attempt final publish automatically after filling the form. The script asks for an email
+address and fills the location as `Warsaw, Poland`.
+
+```powershell
+.\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -AutoPublish
+```
+
+Dry-run the same payload without opening a browser or publishing:
+
+```powershell
+.\scripts\run-local-pipeline.ps1 -Mode dry_run -DataDir .\data\ready_to_publish -Marketplaces facebook -AutoPublish -PublishingEmail you@example.com
+```
+
 Publish for real after recalculating listing plans:
 
 ```powershell

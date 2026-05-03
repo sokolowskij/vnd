@@ -42,3 +42,10 @@ class PostResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class PublishOptions:
+    auto_publish: bool = False
+    contact_email: str | None = None
+    location: str = "Warsaw, Poland"

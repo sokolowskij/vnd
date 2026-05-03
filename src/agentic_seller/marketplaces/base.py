@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..models import ListingPlan, PostResult
+from ..models import ListingPlan, PostResult, PublishOptions
 
 
 class MarketplaceAdapter(ABC):
@@ -20,6 +20,5 @@ class MarketplaceAdapter(ABC):
                 page.close()
 
     @abstractmethod
-    def post(self, context: Any, listing: ListingPlan, mode: str) -> PostResult:
+    def post(self, context: Any, listing: ListingPlan, mode: str, options: PublishOptions | None = None) -> PostResult:
         raise NotImplementedError
-

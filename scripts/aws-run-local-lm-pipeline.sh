@@ -16,6 +16,8 @@
 #   REBUILD=1
 #   USE_PROD_COMPOSE=1
 #   AUTH_MODE=1
+#   AUTO_PUBLISH=1
+#   PUBLISHING_EMAIL=person@example.com
 
 set -euo pipefail
 
@@ -29,6 +31,9 @@ LM_STUDIO_TUNNEL_PORT="${LM_STUDIO_TUNNEL_PORT:-1234}"
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 REBUILD="${REBUILD:-0}"
 AUTH_MODE="${AUTH_MODE:-0}"
+AUTO_PUBLISH="${AUTO_PUBLISH:-0}"
+PUBLISHING_EMAIL="${PUBLISHING_EMAIL:-}"
+PUBLISH_LOCATION="${PUBLISH_LOCATION:-Warsaw, Poland}"
 
 cd "$DEPLOY_DIR"
 
@@ -89,6 +94,12 @@ echo "  Data dir:      $DATA_DIR"
 echo "  Mode:          $MODE"
 echo "  Marketplaces:  $MARKETPLACES"
 echo "  Model API:     $LOCAL_MODEL_API"
+echo "  Auto publish:  $AUTO_PUBLISH"
+echo "  Location:      $PUBLISH_LOCATION"
+
+if [[ "$AUTO_PUBLISH" == "1" && -z "$PUBLISHING_EMAIL" ]]; then
+  read -r -p "Email address for marketplace forms: " PUBLISHING_EMAIL
+fi
 
 cli_args=(
   python -m agentic_seller.cli
@@ -99,6 +110,10 @@ cli_args=(
 
 if [[ "$AUTH_MODE" == "1" ]]; then
   cli_args+=(--auth-mode)
+fi
+
+if [[ "$AUTO_PUBLISH" == "1" ]]; then
+  cli_args+=(--auto-publish --publishing-email "$PUBLISHING_EMAIL" --publish-location "$PUBLISH_LOCATION")
 fi
 
 docker run --rm \

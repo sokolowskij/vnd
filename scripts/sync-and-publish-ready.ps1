@@ -8,6 +8,7 @@ Examples:
   .\scripts\sync-and-publish-ready.ps1
   .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -InstallBrowsers
   .\scripts\sync-and-publish-ready.ps1 -AuthMode -Marketplaces facebook
+  .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -AutoPublish
   .\scripts\sync-and-publish-ready.ps1 -UseProdCompose -Yes
 #>
 
@@ -22,6 +23,9 @@ param(
     [switch]$InstallBrowsers,
     [switch]$SkipDependencyInstall,
     [switch]$AuthMode,
+    [switch]$AutoPublish,
+    [string]$PublishingEmail = "",
+    [string]$PublishLocation = "Warsaw, Poland",
     [switch]$Yes,
     [switch]$KeepArchive
 )
@@ -76,6 +80,10 @@ if ($AuthMode) {
         exit $LASTEXITCODE
     }
     exit 0
+}
+
+if ($AutoPublish -and -not $PublishingEmail) {
+    $PublishingEmail = Read-Host "Email address for marketplace forms"
 }
 
 if (-not (Test-Path $Key)) {
@@ -149,6 +157,10 @@ $PublishArgs = @(
 
 if ($Yes) {
     $PublishArgs += "-Yes"
+}
+
+if ($AutoPublish) {
+    $PublishArgs += @("-AutoPublish", "-PublishingEmail", $PublishingEmail, "-PublishLocation", $PublishLocation)
 }
 
 & powershell @PublishArgs

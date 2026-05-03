@@ -9,6 +9,7 @@
 #   ./scripts/run-local-pipeline.sh -Mode publish -Marketplaces facebook -Recalculate
 #   ./scripts/run-local-pipeline.sh -Mode publish -Marketplaces olx,facebook -Yes
 #   ./scripts/run-local-pipeline.sh -AuthMode -Marketplaces facebook
+#   AUTO_PUBLISH=1 ./scripts/run-local-pipeline.sh -Mode publish -Marketplaces facebook
 #
 # Notes:
 #   - By default, existing listing_plan.json files are reused as cached data.
@@ -16,6 +17,7 @@
 #   - dry_run writes post_results.json without submitting listings.
 #   - publish opens/uses marketplace browser automation and may post real listings.
 #   - AuthMode opens marketplace browser profiles for login only and does not post.
+#   - AUTO_PUBLISH=1 tries to click the final marketplace publish button after filling the form.
 #   - publish asks for a final published-count confirmation after browser flows complete.
 #   - On AWS, if ./data/products does not exist but the backend container is
 #     running, this script processes /app/data/products from the Docker volume.
@@ -33,6 +35,9 @@ RECALCULATE=0
 YES=0
 INSTALL_BROWSERS=0
 AUTH_MODE=0
+AUTO_PUBLISH="${AUTO_PUBLISH:-0}"
+PUBLISHING_EMAIL="${PUBLISHING_EMAIL:-}"
+PUBLISH_LOCATION="${PUBLISH_LOCATION:-Warsaw, Poland}"
 USE_PROD_COMPOSE="${USE_PROD_COMPOSE:-0}"
 REBUILD="${REBUILD:-0}"
 
@@ -106,6 +111,8 @@ run_in_backend_data_container() {
   echo "Mode:         $MODE"
   echo "Marketplaces: ${MARKETPLACES[*]}"
   echo "Model API:    $model_api"
+  echo "AutoPublish:  $([[ "$AUTO_PUBLISH" == "1" ]] && echo enabled || echo disabled)"
+  echo "Location:     $PUBLISH_LOCATION"
   if [[ "$RECALCULATE" == "1" ]]; then
     echo "Listings:     recalculate"
   else
@@ -124,6 +131,10 @@ run_in_backend_data_container() {
       python -m agentic_seller.cli --help | grep -q -- "--use-cached-listings"; then
       cli_args+=(--use-cached-listings)
     fi
+  fi
+
+  if [[ "$AUTO_PUBLISH" == "1" ]]; then
+    cli_args+=(--auto-publish --publishing-email "$PUBLISHING_EMAIL" --publish-location "$PUBLISH_LOCATION")
   fi
 
   docker run --rm \
@@ -185,6 +196,18 @@ while [[ $# -gt 0 ]]; do
       AUTH_MODE=1
       shift
       ;;
+    -AutoPublish|--auto-publish)
+      AUTO_PUBLISH=1
+      shift
+      ;;
+    -PublishingEmail|--publishing-email)
+      PUBLISHING_EMAIL="${2:-}"
+      shift 2
+      ;;
+    -PublishLocation|--publish-location)
+      PUBLISH_LOCATION="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -223,11 +246,18 @@ fi
 
 if [[ "$MODE" == "publish" && "$YES" != "1" && "$AUTH_MODE" != "1" ]]; then
   echo "Publish mode may create real marketplace listings."
+  if [[ "$AUTO_PUBLISH" == "1" ]]; then
+    echo "AUTO_PUBLISH is enabled and may click final marketplace publish buttons."
+  fi
   read -r -p "Type PUBLISH to continue: " answer
   if [[ "$answer" != "PUBLISH" ]]; then
     echo "Cancelled."
     exit 1
   fi
+fi
+
+if [[ "$AUTO_PUBLISH" == "1" && -z "$PUBLISHING_EMAIL" ]]; then
+  read -r -p "Email address for marketplace forms: " PUBLISHING_EMAIL
 fi
 
 if [[ "$AUTH_MODE" == "1" ]]; then
@@ -253,6 +283,8 @@ echo "DataDir:      $RESOLVED_DATA_DIR"
 echo "Mode:         $MODE"
 echo "Marketplaces: ${MARKETPLACES[*]}"
 echo "UserDataDir:  $USER_DATA_DIR"
+echo "AutoPublish:  $([[ "$AUTO_PUBLISH" == "1" ]] && echo enabled || echo disabled)"
+echo "Location:     $PUBLISH_LOCATION"
 if [[ "$RECALCULATE" == "1" ]]; then
   echo "Listings:     recalculate"
 else
@@ -274,6 +306,10 @@ fi
 
 if [[ "$AUTH_MODE" == "1" ]]; then
   CLI_ARGS+=(--auth-mode)
+fi
+
+if [[ "$AUTO_PUBLISH" == "1" ]]; then
+  CLI_ARGS+=(--auto-publish --publishing-email "$PUBLISHING_EMAIL" --publish-location "$PUBLISH_LOCATION")
 fi
 
 PYTHONUNBUFFERED=1 "$PYTHON" -u "${CLI_ARGS[@]}"

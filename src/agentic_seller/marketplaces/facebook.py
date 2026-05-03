@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..models import ListingPlan, PostResult
+from ..models import ListingPlan, PostResult, PublishOptions
 from .base import MarketplaceAdapter
 
 
@@ -55,6 +55,38 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
 
         field.fill(value)
         return True
+
+    def _fill_typeahead_field(self, page: Any, labels: list[str], value: str, field_name: str) -> bool:
+        field = self._first_fillable(page, labels, timeout=3500)
+        if field is None:
+            print(f"  [WARN] Facebook {field_name} field was not found.")
+            return False
+
+        try:
+            field.fill(value)
+            page.wait_for_timeout(1000)
+            page.keyboard.press("ArrowDown")
+            page.keyboard.press("Enter")
+        except Exception:
+            try:
+                field.fill(value)
+            except Exception as exc:
+                print(f"  [WARN] Facebook {field_name} fill failed: {exc}")
+                return False
+        return True
+
+    def _click_final_publish(self, page: Any) -> bool:
+        labels = ["Publish", "Opublikuj", "Post", "Dodaj", "Submit"]
+        for label in labels:
+            try:
+                button = page.get_by_role("button", name=re.compile(re.escape(label), re.IGNORECASE)).last
+                button.click(timeout=5000)
+                page.wait_for_timeout(3000)
+                return True
+            except Exception:
+                continue
+        print("  [WARN] Facebook final publish button was not found.")
+        return False
 
     def _absolute_existing_images(self, listing: ListingPlan) -> list[str]:
         image_paths: list[str] = []
@@ -125,8 +157,20 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
             print(f"  [WARN] Facebook photo upload failed: {exc or last_error}")
             return False
 
-    def post(self, context: Any, listing: ListingPlan, mode: str) -> PostResult:
+    def post(self, context: Any, listing: ListingPlan, mode: str, options: PublishOptions | None = None) -> PostResult:
+        options = options or PublishOptions()
         if mode == "dry_run":
+            if options.auto_publish:
+                return PostResult(
+                    marketplace=self.name,
+                    success=True,
+                    mode=mode,
+                    message=(
+                        "Dry-run auto-publish: payload prepared for Facebook Marketplace. "
+                        f"Would fill location '{options.location}', "
+                        f"email '{options.contact_email or '-'}', and click Publish."
+                    ),
+                )
             return PostResult(
                 marketplace=self.name,
                 success=True,
@@ -177,6 +221,27 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
             else:
                 missing_steps.append("photos")
 
+            if self._fill_typeahead_field(
+                page,
+                ["Lokalizacja", "Miejscowość", "Miasto", "Kod pocztowy", "Location", "City", "Postal code", "ZIP"],
+                options.location,
+                "location",
+            ):
+                filled_steps.append("location")
+            else:
+                missing_steps.append("location")
+
+            if options.contact_email:
+                if self._fill_field(
+                    page,
+                    ["E-mail", "Email", "Adres e-mail", "Adres email", "Contact email", "Kontaktowy email"],
+                    options.contact_email,
+                    "email",
+                ):
+                    filled_steps.append("email")
+                else:
+                    missing_steps.append("email")
+
             print("  [INFO] Facebook category is left for manual selection.")
             missing_steps.append("category")
 
@@ -218,21 +283,30 @@ class FacebookMarketplaceAdapter(MarketplaceAdapter):
             except Exception as e:
                 print(f"  [DEBUG] Condition automation skipped: {e}")
 
-            print(f"  [WAITING] Facebook form prepared. Please review and click 'Publish' in the browser.")
-            if missing_steps:
-                print(f"  [WARN] Review these fields manually: {', '.join(missing_steps)}")
-            print(f"  [WAITING] The agent will proceed once you close the page.")
-            page.wait_for_event("close", timeout=0)
+            auto_clicked = False
+            if options.auto_publish:
+                print("  [AUTO] Facebook form prepared. Attempting final Publish click.")
+                auto_clicked = self._click_final_publish(page)
+                if not auto_clicked:
+                    missing_steps.append("final_publish")
+            else:
+                print(f"  [WAITING] Facebook form prepared. Please review and click 'Publish' in the browser.")
+                if missing_steps:
+                    print(f"  [WARN] Review these fields manually: {', '.join(missing_steps)}")
+                print(f"  [WAITING] The agent will proceed once you close the page.")
+                page.wait_for_event("close", timeout=0)
 
-            message = "Listing flow completed by human."
+            message = "Listing flow completed by automation." if options.auto_publish else "Listing flow completed by human."
             if missing_steps:
                 message += f" Manual review needed for: {', '.join(missing_steps)}."
             if filled_steps:
                 message += f" Automated: {', '.join(filled_steps)}."
+            if options.auto_publish and auto_clicked:
+                message += " Final Publish button clicked."
 
             return PostResult(
                 marketplace=self.name,
-                success=True,
+                success=not (options.auto_publish and not auto_clicked),
                 mode=mode,
                 message=message,
                 url=page.url,

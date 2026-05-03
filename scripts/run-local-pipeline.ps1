@@ -9,6 +9,7 @@ Examples:
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -Recalculate
   .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces olx,facebook -Yes
   .\scripts\run-local-pipeline.ps1 -AuthMode -Marketplaces facebook
+  .\scripts\run-local-pipeline.ps1 -Mode publish -Marketplaces facebook -AutoPublish
 
 Notes:
   - By default, existing listing_plan.json files are reused as cached data.
@@ -16,6 +17,7 @@ Notes:
   - dry_run writes post_results.json without submitting listings.
   - publish opens/uses marketplace browser automation and may post real listings.
   - AuthMode opens marketplace browser profiles for login only and does not post.
+  - AutoPublish tries to click the final marketplace publish button after filling the form.
   - publish asks for a final published-count confirmation after browser flows complete.
   - Configure .env first. For LM Studio, keep the local server running.
 #>
@@ -29,7 +31,10 @@ param(
     [switch]$Recalculate,
     [switch]$Yes,
     [switch]$InstallBrowsers,
-    [switch]$AuthMode
+    [switch]$AuthMode,
+    [switch]$AutoPublish,
+    [string]$PublishingEmail = "",
+    [string]$PublishLocation = "Warsaw, Poland"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,11 +57,18 @@ if ($InstallBrowsers) {
 
 if ($Mode -eq "publish" -and -not $Yes -and -not $AuthMode) {
     Write-Host "Publish mode may create real marketplace listings."
+    if ($AutoPublish) {
+        Write-Host "AUTO_PUBLISH is enabled and may click final marketplace publish buttons."
+    }
     $answer = Read-Host "Type PUBLISH to continue"
     if ($answer -ne "PUBLISH") {
         Write-Host "Cancelled."
         exit 1
     }
+}
+
+if ($AutoPublish -and -not $PublishingEmail) {
+    $PublishingEmail = Read-Host "Email address for marketplace forms"
 }
 
 if (-not $DataDir) {
@@ -81,6 +93,8 @@ Write-Host "Mode:         $Mode"
 Write-Host "Marketplaces: $($Marketplaces -join ', ')"
 Write-Host "UserDataDir:  $env:USER_DATA_DIR"
 Write-Host "Listings:     $(if ($Recalculate) { 'recalculate' } else { 'use cached when available' })"
+Write-Host "AutoPublish:  $(if ($AutoPublish) { 'enabled' } else { 'disabled' })"
+Write-Host "Location:     $PublishLocation"
 
 $CliArgs = @(
     "-m",
@@ -98,6 +112,10 @@ if (-not $Recalculate) {
 
 if ($AuthMode) {
     $CliArgs += "--auth-mode"
+}
+
+if ($AutoPublish) {
+    $CliArgs += @("--auto-publish", "--publishing-email", $PublishingEmail, "--publish-location", $PublishLocation)
 }
 
 & $Python @CliArgs
