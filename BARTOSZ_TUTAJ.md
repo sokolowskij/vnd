@@ -501,3 +501,27 @@ And on AWS:
 cd /opt/vnd
 MODE=dry_run MARKETPLACES="facebook" ./scripts/run-local-pipeline.sh
 ```
+
+For another user, it becomes their own folder automatically, for example:
+
+  C:\Users\Bartosz\.ssh\vnd_aws
+
+  The thing that must be set up is not $env:USERPROFILE; it is the .ssh folder and key file:
+
+  New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.ssh"
+  ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\vnd_aws" -C "bartosz-vnd-aws"
+
+  If $env:USERPROFILE is somehow missing because the shell is weird, use $HOME:
+
+  $HOME\.ssh\vnd_aws
+
+  Or the most robust PowerShell version:
+
+  $UserHome = [Environment]::GetFolderPath("UserProfile")
+  $Key = Join-Path $UserHome ".ssh\vnd_aws"
+
+  In Git Bash or Linux, use:
+
+  ~/.ssh/vnd_aws
+
+  So no, the user should not manually configure $env:USERPROFILE. But yes, the new PC needs its own ~/.ssh/vnd_aws key, and that key’s .pub file needs to be added to AWS authorized_keys.
