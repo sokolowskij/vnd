@@ -230,6 +230,12 @@ C:\Users\jedre\Desktop\snn\data\server-products
 
 ## New Windows PC: Publish Approved AWS Items Locally
 
+For the full new-PC workflow where the PC downloads AWS photos, generates descriptions locally with LM Studio, uploads generated data back to AWS, then downloads approved items for publishing, use:
+
+```text
+NEW_PC_LOCAL_WORKFLOW.md
+```
+
 Use this when the item was already generated and approved in Boss Review, and the new PC only needs the photos plus cached listing data for local browser publishing.
 
 Run this in local Windows PowerShell, from the repo folder:
@@ -501,67 +507,3 @@ And on AWS:
 cd /opt/vnd
 MODE=dry_run MARKETPLACES="facebook" ./scripts/run-local-pipeline.sh
 ```
-
-For another user, it becomes their own folder automatically, for example:
-
-  C:\Users\Bartosz\.ssh\vnd_aws
-
-  The thing that must be set up is not $env:USERPROFILE; it is the .ssh folder and key file:
-
-  New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.ssh"
-  ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\vnd_aws" -C "bartosz-vnd-aws"
-
-  If $env:USERPROFILE is somehow missing because the shell is weird, use $HOME:
-
-  $HOME\.ssh\vnd_aws
-
-  Or the most robust PowerShell version:
-
-  $UserHome = [Environment]::GetFolderPath("UserProfile")
-  $Key = Join-Path $UserHome ".ssh\vnd_aws"
-
-  In Git Bash or Linux, use:
-
-  ~/.ssh/vnd_aws
-
-  So no, the user should not manually configure $env:USERPROFILE. But yes, the new PC needs its own ~/.ssh/vnd_aws key, and that key’s .pub file needs to be added to AWS authorized_keys.
-
-
-
- Creating the key on the new PC is only step 1. You must add the new PC’s public key to the AWS server’s:
-
-  /home/ubuntu/.ssh/authorized_keys
-
-  Do not share/paste the private key.
-
-  On the new PC, show the public key:
-
-  Get-Content "$env:USERPROFILE\.ssh\vnd_aws.pub"
-
-  It should be one long line starting with:
-
-  ssh-ed25519 ...
-
-  Then, from a PC that can still SSH into AWS, run this:
-
-  scp -i "$env:USERPROFILE\.ssh\vnd_aws" "C:\path\to\new_pc_vnd_aws.pub" ubuntu@51.102.104.11:/tmp/new_pc_vnd_aws.pub
-
-  ssh -i "$env:USERPROFILE\.ssh\vnd_aws" ubuntu@51.102.104.11 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat /tmp/new_pc_vnd_aws.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && rm /tmp/    
-  new_pc_vnd_aws.pub"
-
-  Then on the new PC test:
-
-  ssh -i "$env:USERPROFILE\.ssh\vnd_aws" ubuntu@51.102.104.11
-
-  And then the tunnel:
-
-  .\scripts\open-lmstudio-aws-tunnel.ps1
-
-  Also check this: if you created the key with a different name, like id_ed25519, the script will not use it unless you pass it:
-
-  .\scripts\open-lmstudio-aws-tunnel.ps1 -Key "$env:USERPROFILE\.ssh\id_ed25519"
-
-  Important: adding a new “key pair” in the AWS Console usually does not automatically give access to an already-running EC2 instance. The public key must be in authorized_keys on that server.
-
-
-› Find and fix a bug in @filename
