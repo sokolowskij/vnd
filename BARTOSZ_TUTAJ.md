@@ -525,3 +525,43 @@ For another user, it becomes their own folder automatically, for example:
   ~/.ssh/vnd_aws
 
   So no, the user should not manually configure $env:USERPROFILE. But yes, the new PC needs its own ~/.ssh/vnd_aws key, and that key’s .pub file needs to be added to AWS authorized_keys.
+
+
+
+ Creating the key on the new PC is only step 1. You must add the new PC’s public key to the AWS server’s:
+
+  /home/ubuntu/.ssh/authorized_keys
+
+  Do not share/paste the private key.
+
+  On the new PC, show the public key:
+
+  Get-Content "$env:USERPROFILE\.ssh\vnd_aws.pub"
+
+  It should be one long line starting with:
+
+  ssh-ed25519 ...
+
+  Then, from a PC that can still SSH into AWS, run this:
+
+  scp -i "$env:USERPROFILE\.ssh\vnd_aws" "C:\path\to\new_pc_vnd_aws.pub" ubuntu@51.102.104.11:/tmp/new_pc_vnd_aws.pub
+
+  ssh -i "$env:USERPROFILE\.ssh\vnd_aws" ubuntu@51.102.104.11 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat /tmp/new_pc_vnd_aws.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && rm /tmp/    
+  new_pc_vnd_aws.pub"
+
+  Then on the new PC test:
+
+  ssh -i "$env:USERPROFILE\.ssh\vnd_aws" ubuntu@51.102.104.11
+
+  And then the tunnel:
+
+  .\scripts\open-lmstudio-aws-tunnel.ps1
+
+  Also check this: if you created the key with a different name, like id_ed25519, the script will not use it unless you pass it:
+
+  .\scripts\open-lmstudio-aws-tunnel.ps1 -Key "$env:USERPROFILE\.ssh\id_ed25519"
+
+  Important: adding a new “key pair” in the AWS Console usually does not automatically give access to an already-running EC2 instance. The public key must be in authorized_keys on that server.
+
+
+› Find and fix a bug in @filename
