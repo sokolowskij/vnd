@@ -1,5 +1,7 @@
 # Agentic Seller - Docker Deployment Guide
 
+Current note: Docker is for AWS deployment only. The local Windows workflow uses Python venv, PowerShell, LM Studio, and Playwright directly. Do not use local Docker for the normal local workflow. See `README.md` and `FINAL_README.md`.
+
 This guide covers containerizing and deploying your Agentic Seller system to AWS (EC2/Lightsail) using Docker and Docker Compose.
 
 ## Architecture Overview
@@ -12,7 +14,7 @@ This guide covers containerizing and deploying your Agentic Seller system to AWS
 │  ┌──────────────────┐  ┌──────────────────┐ │
 │  │  Frontend (8501) │  │  Backend (8000)  │ │
 │  │  Streamlit       │  │  FastAPI         │ │
-│  │  Dashboard       │  │  + Agent CLI     │ │
+│  │  Dashboard       │  │  Review API      │ │
 │  └────────┬─────────┘  └────────┬─────────┘ │
 │           │                      │          │
 │           └──────────┬───────────┘          │
@@ -25,89 +27,39 @@ This guide covers containerizing and deploying your Agentic Seller system to AWS
 │         ┌────────────▼──────────────┐       │
 │         │  Persistent Volume        │       │
 │         │  /app/data/               │       │
-│         │  - browser_profiles/      │       │
-│         │  - jobs/                  │       │
 │         │  - products/              │       │
-│         │  - results/               │       │
+│         │  - ready_to_publish/      │       │
+│         │  - auth/                  │       │
 │         └───────────────────────────┘       │
 └─────────────────────────────────────────────┘
 ```
 
-## Local Setup (Before Docker)
+## Local Setup
 
-1. **Ensure dependencies are installed:**
-   ```bash
-   pip install -r requirements.txt
-   playwright install chromium
-   ```
+Do not use Docker locally for the normal workflow.
 
-2. **For LM Studio users (recommended - no API key needed):**
-   ```bash
-   # Install LM Studio from https://lmstudio.ai
-   # Download a vision-capable model (moondream2, llava, etc.)
-   # Start the local server (port 1234)
-   
-   # .env is already configured for LM Studio
-   cp .env.example .env
-   # LOCAL_MODEL_API, OPENAI_API_KEY=local-model already set
-   ```
+Local Windows uses Python venv, PowerShell, LM Studio, and Playwright directly:
 
-3. **Or use OpenAI API (optional):**
-   ```bash
-   cp .env.example .env
-   nano .env  # Set OPENAI_API_KEY=sk-your-api-key
-   ```
-
-**See `LM-STUDIO-SETUP.md` for detailed LM Studio configuration.**
-
-## Building Docker Images Locally
-
-### Build individually:
-```bash
-# Backend
-docker build -f Dockerfile.backend -t agentic-seller-backend:latest .
-
-# Frontend
-docker build -f Dockerfile.frontend -t agentic-seller-frontend:latest .
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-### Or use Docker Compose (recommended):
-```bash
-docker-compose build
-```
-
-## Running Locally with Docker Compose
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Check service status
-docker-compose ps
-
-# Stop services
-docker-compose down
-
-# Stop and remove volumes (WARNING: deletes data)
-docker-compose down -v
-```
+AWS Docker images are built on AWS through Docker Compose. Local Docker Desktop is not required.
 
 ## Environment Variables
 
-Key environment variables in `.env`:
+Key AWS environment variables in `/opt/vnd/.env`:
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `OPENAI_API_KEY` | Your OpenAI API key | `sk-...` |
-| `OPENAI_MODEL` | Model to use | `google/gemma-4-e4b` |
-| `POST_MODE` | Publishing mode | `dry_run` or `publish` |
-| `HEADLESS` | Run browser headless | `true` |
-| `ENABLE_OLX` | Enable OLX marketplace | `true` |
-| `ENABLE_FACEBOOK` | Enable Facebook marketplace | `true` |
-| `USER_DATA_DIR` | Path to browser profiles | `/app/data/browser_profiles` |
+| `SESSION_TTL_DAYS` | Browser session lifetime | `30` |
+| `PENDING_RETENTION_DAYS` | In-review item retention | `90` |
+| `READY_RETENTION_DAYS` | Approved item retention | `30` |
+| `DAILY_BACKUP_ENABLED` | Enable email backups | `false` |
+| `ADMIN_BACKUP_EMAIL` | Backup recipient | `admin@example.com` |
 
 ## AWS Deployment
 
@@ -122,23 +74,29 @@ Key environment variables in `.env`:
    ssh -i your-key.pem ubuntu@your-instance-ip
    ```
 
-3. **Run deployment script:**
+3. **Clone and start the AWS dashboard/API app:**
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/yourusername/agentic-seller/main/deploy.sh | bash -s https://github.com/yourusername/agentic-seller.git
+   cd /opt
+   sudo git clone https://github.com/sokolowskij/vnd.git vnd
+   sudo chown -R ubuntu:ubuntu /opt/vnd
+   cd /opt/vnd
+   cp .env.example .env
+   BUILD=1 ./scripts/aws-start.sh
    ```
 
 4. **Configure environment:**
    ```bash
-   sudo nano /opt/agentic-seller/.env
-   # Add your OPENAI_API_KEY and other settings
+   nano /opt/vnd/.env
+   # Configure retention/session/backup settings.
    
    # Restart services
-   docker-compose -f /opt/agentic-seller/docker-compose.yml restart
+   cd /opt/vnd
+   BUILD=1 ./scripts/aws-start.sh
    ```
 
 5. **Access your deployment:**
    - Dashboard: `http://your-instance-ip:8501`
-   - API: `http://your-instance-ip:8000`
+   - API health: `http://your-instance-ip:8000/health` if port 8000 is exposed
 
 ### Manual Steps
 
@@ -162,17 +120,16 @@ sudo chmod +x /usr/local/bin/docker-compose
 
 # 5. Clone repository
 cd /opt
-sudo git clone https://github.com/yourusername/agentic-seller.git
-sudo chown -R $USER:$USER agentic-seller
-cd agentic-seller
+sudo git clone https://github.com/sokolowskij/vnd.git vnd
+sudo chown -R $USER:$USER vnd
+cd vnd
 
 # 6. Setup environment
 cp .env.example .env
-nano .env  # Configure your API keys
+nano .env  # Configure retention/session/backup settings
 
 # 7. Build and start
-docker-compose build
-docker-compose up -d
+BUILD=1 ./scripts/aws-start.sh
 
 # 8. View logs
 docker-compose logs -f
@@ -314,20 +271,13 @@ docker-compose restart backend
 ## Updating Your Deployment
 
 ```bash
-cd /opt/agentic-seller
+cd /opt/vnd
 
 # Pull latest changes
-git pull origin main
+git pull
 
-# Rebuild images
-docker-compose build
-
-# Restart services
-docker-compose restart
-
-# Or full restart
-docker-compose down
-docker-compose up -d
+# Rebuild and restart dashboard/API containers
+BUILD=1 ./scripts/aws-start.sh
 ```
 
 ## Performance Tuning
@@ -369,7 +319,7 @@ docker-compose version
 docker --version
 docker-compose ps
 docker-compose logs backend | head -100
-env | grep -E "(OPENAI|POST_MODE|HEADLESS)"
+env | grep -E "(SESSION_TTL|RETENTION|BACKUP|SMTP)"
 ```
 
 ## Next Steps

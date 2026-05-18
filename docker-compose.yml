@@ -1,5 +1,5 @@
 services:
-  # Backend: FastAPI + Agent orchestration
+  # Backend: FastAPI dashboard/API runtime
   backend:
     build:
       context: .
@@ -8,17 +8,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # LM Studio Configuration (runs on host machine)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-local-model}
-      - OPENAI_MODEL=${OPENAI_MODEL:-google/gemma-4-e4b}
-      - LOCAL_MODEL_API=${LOCAL_MODEL_API:-http://host.docker.internal:1234/v1}
-      # Other settings
-      - DEFAULT_CURRENCY=${DEFAULT_CURRENCY:-PLN}
-      - POST_MODE=${POST_MODE:-dry_run}
-      - HEADLESS=${HEADLESS:-true}
-      - ENABLE_OLX=${ENABLE_OLX:-true}
-      - ENABLE_FACEBOOK=${ENABLE_FACEBOOK:-true}
-      - USER_DATA_DIR=/app/data/browser_profiles
+      # AWS runs only the dashboard/API and product-data management.
+      # Listing generation and publishing run from a local PC.
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-30}
       - PENDING_RETENTION_DAYS=${PENDING_RETENTION_DAYS:-90}
       - READY_RETENTION_DAYS=${READY_RETENTION_DAYS:-30}
@@ -34,13 +25,10 @@ services:
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
     volumes:
-      # Persistent volume for agent state, browser profiles, and results
+      # Persistent volume for product data, auth/session state, and review metadata.
       - agentic_data:/app/data
     networks:
       - agentic-network
-    # Allow container to access host's localhost (for LM Studio)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -78,7 +66,7 @@ services:
       start_period: 15s
 
 volumes:
-  # Persistent volume for SQLite db, browser profiles, and job results
+  # Persistent volume for uploaded products, approved products, auth, and review metadata.
   agentic_data:
     driver: local
 

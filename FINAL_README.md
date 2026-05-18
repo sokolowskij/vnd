@@ -1,64 +1,52 @@
-# Agentic Seller
+# Final Workflow: AWS Dashboard, Local Generation And Publishing
 
-Product intake, review, listing generation, and assisted marketplace publishing.
+This is the current operating model for the project.
 
-## Current Model
-
-Docker is used on AWS only.
-
-Local Windows does not need Docker.
-
-Use AWS for:
+AWS is only for:
 
 - Streamlit dashboard
 - FastAPI backend
-- uploads
+- user accounts/sessions
+- product uploads
 - Boss Review
 - photo rotation/deletion
 - approvals
-- product data storage
+- storing product data in the Docker volume
 
-Use the local Windows PC for:
+The local Windows PC is for:
 
 - LM Studio
 - listing generation
-- Playwright browser automation
+- Playwright/browser automation
 - marketplace publishing
 
-This split keeps AWS lightweight and avoids installing browser automation dependencies on the server.
+This keeps the AWS deployment smaller and cheaper. The AWS backend image no longer installs Playwright Chromium or browser system dependencies.
 
-## Main Docs
+## Repository Locations
 
-Use this file for the normal workflow.
+Local Windows PC:
 
-Use [FINAL_README.md](FINAL_README.md) for the full operational runbook.
+```powershell
+cd C:\Users\jedre\Desktop\snn
+```
 
-Use [NEW_PC_LOCAL_WORKFLOW.md](NEW_PC_LOCAL_WORKFLOW.md) for setting up a fresh Windows PC.
+AWS server:
+
+```bash
+cd /opt/vnd
+```
+
+AWS SSH:
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\vnd_aws ubuntu@51.102.104.11
+```
 
 ## AWS Deployment
 
-AWS runs Docker Compose. The AWS containers are dashboard/API only.
+AWS runs Docker Compose.
 
-The backend AWS image uses:
-
-```text
-requirements.aws-backend.txt
-```
-
-The frontend AWS image uses:
-
-```text
-requirements.aws-frontend.txt
-```
-
-The local PC still uses:
-
-```text
-requirements.txt
-pyproject.toml
-```
-
-Update AWS after pushing code:
+After pushing code from local Git, update AWS:
 
 ```bash
 cd /opt/vnd
@@ -67,16 +55,28 @@ chmod +x scripts/*.sh
 BUILD=1 ./scripts/aws-start.sh
 ```
 
-Use `BUILD=1` after backend, frontend, Dockerfile, or dependency changes.
+Use `BUILD=1` after changes to:
 
-For frontend-only changes:
+- `dashboard.py`
+- `src/agentic_seller/api.py`
+- Dockerfiles
+- dependency files
+
+For frontend-only changes you can use:
 
 ```bash
 cd /opt/vnd
 ./scripts/aws-reload-frontend.sh
 ```
 
-Check AWS services:
+Stop app containers without stopping the EC2 instance:
+
+```bash
+cd /opt/vnd
+./scripts/aws-stop.sh
+```
+
+Check services:
 
 ```bash
 docker compose ps
@@ -84,18 +84,29 @@ docker compose logs -f backend
 docker compose logs -f frontend
 ```
 
-Stop app containers:
+## Lightweight AWS Images
 
-```bash
-cd /opt/vnd
-./scripts/aws-stop.sh
+AWS uses these dependency files:
+
+```text
+requirements.aws-backend.txt
+requirements.aws-frontend.txt
 ```
 
-Stopping containers does not stop EC2 billing. Stop the EC2 instance if you want to stop compute cost.
+Local development still uses:
+
+```text
+requirements.txt
+pyproject.toml
+```
+
+Do not add Playwright, OpenAI, LM Studio, or publishing dependencies to the AWS requirements unless the AWS role changes again.
+
+The backend Docker image should stay dashboard/API-only.
 
 ## Local Windows Setup
 
-Run this in PowerShell:
+Run once on a new Windows PC:
 
 ```powershell
 cd C:\Users\jedre\Desktop\snn
@@ -106,7 +117,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 notepad .env
 ```
 
-For LM Studio:
+For LM Studio, local `.env` should contain:
 
 ```env
 LOCAL_MODEL_API=http://localhost:1234/v1
@@ -117,45 +128,9 @@ USER_DATA_DIR=browser_profiles
 
 Start LM Studio, load the model, and enable the local server on port `1234`.
 
-Do not install Docker Desktop for the local workflow. It is not needed.
-
-## Data Locations
-
-AWS uploads are inside the backend container:
-
-```text
-/app/data/products
-```
-
-AWS approved items are inside:
-
-```text
-/app/data/ready_to_publish
-```
-
-Both are backed by the Docker volume:
-
-```text
-agentic_data
-```
-
-They are not normal files under `/opt/vnd/data`.
-
-Local downloaded raw products:
-
-```text
-.\data\server-products
-```
-
-Local downloaded approved products:
-
-```text
-.\data\ready_to_publish
-```
-
 ## Download Uploaded Products From AWS
 
-Run from local PowerShell:
+Run in local PowerShell:
 
 ```powershell
 cd C:\Users\jedre\Desktop\snn
@@ -178,19 +153,17 @@ If AWS uses the production compose override:
 $Compose = "docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 ```
 
-This uses Docker on AWS through SSH. It does not require Docker locally.
-
 ## Generate Listings Locally
 
 Start LM Studio first.
 
-Generate fresh listing plans:
+Regenerate listing plans from downloaded AWS photos:
 
 ```powershell
 .\scripts\run-local-pipeline.ps1 -DataDir .\data\server-products -Mode dry_run -Marketplaces facebook -Recalculate
 ```
 
-Use cached `listing_plan.json` when available:
+Use cached `listing_plan.json` files when present:
 
 ```powershell
 .\scripts\run-local-pipeline.ps1 -DataDir .\data\server-products -Mode dry_run -Marketplaces facebook
@@ -203,11 +176,11 @@ listing_plan.json
 post_results.json
 ```
 
-No marketplace listing is published in `dry_run` mode.
+It does not publish anything in `dry_run` mode.
 
 ## Upload Generated Listings Back To AWS
 
-Run from local PowerShell:
+Run in local PowerShell:
 
 ```powershell
 tar -czf .\server-products-processed.tgz -C .\data\server-products .
@@ -215,41 +188,17 @@ scp -i $Key .\server-products-processed.tgz "${Server}:/tmp/server-products-proc
 ssh -i $Key $Server "cd /opt/vnd && $Compose cp /tmp/server-products-processed.tgz backend:/tmp/server-products-processed.tgz && $Compose exec -T backend tar -xzf /tmp/server-products-processed.tgz -C /app/data/products"
 ```
 
-Then open the AWS dashboard and refresh Boss Review.
+Then open the AWS dashboard, refresh Boss Review, edit/rotate/delete photos if needed, and approve items.
 
-Dashboard:
+Dashboard URL:
 
 ```text
 http://51.102.104.11:8501
 ```
 
-## Boss Review
-
-Use the AWS dashboard to:
-
-- review descriptions
-- edit title/price/category/condition
-- edit product facts
-- rotate photos
-- delete photos
-- choose cover photo
-- approve items
-
-Approved items move from:
-
-```text
-/app/data/products
-```
-
-to:
-
-```text
-/app/data/ready_to_publish
-```
-
 ## Publish Approved Items Locally
 
-Run from local PowerShell:
+After Boss Review approval, run this on local Windows:
 
 ```powershell
 cd C:\Users\jedre\Desktop\snn
@@ -268,7 +217,7 @@ Log in to Facebook only:
 .\scripts\sync-and-publish-ready.ps1 -AuthMode -Marketplaces facebook
 ```
 
-Try final publish click automatically:
+Try to click the final publish button automatically:
 
 ```powershell
 .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -AutoPublish -PublishingEmail you@example.com
@@ -285,9 +234,43 @@ Useful options:
 .\scripts\sync-and-publish-ready.ps1 -Marketplaces facebook -PublishLocation "Warsaw, Poland"
 ```
 
-## AWS Disk Cleanup
+## Data Locations
 
-Check disk usage:
+AWS product uploads live inside the backend container at:
+
+```text
+/app/data/products
+```
+
+AWS approved items live at:
+
+```text
+/app/data/ready_to_publish
+```
+
+Those paths are backed by the Docker volume:
+
+```text
+agentic_data
+```
+
+They are not normal files under `/opt/vnd/data`.
+
+Local downloaded raw products:
+
+```text
+.\data\server-products
+```
+
+Local downloaded approved products:
+
+```text
+.\data\ready_to_publish
+```
+
+## Disk Cleanup On AWS
+
+Check disk:
 
 ```bash
 df -h
@@ -302,26 +285,49 @@ docker image prune -af
 sudo journalctl --vacuum-time=7d
 ```
 
-Do not run this unless you explicitly accept Docker volume risk:
+Do not run this unless you explicitly understand the volume risk:
 
 ```bash
 docker system prune -af --volumes
 ```
 
-## Architecture
+The active product-data volume should remain attached to the backend container.
 
-- `dashboard.py`: Streamlit dashboard
-- `src/agentic_seller/api.py`: FastAPI backend for uploads, review data, auth, retention, backup, deletion, downloads
-- `src/agentic_seller/analyzer.py`: local multimodal listing generation
-- `src/agentic_seller/orchestrator.py`: local pipeline runner
-- `src/agentic_seller/marketplaces/*`: local marketplace browser automation
-- `scripts/run-local-pipeline.ps1`: local generation helper
-- `scripts/sync-and-publish-ready.ps1`: local approved-item sync and publishing helper
+## Cost Model
 
-## Important Rule
+The expected AWS costs are:
 
-Do not run Playwright publishing on AWS.
+- EC2 compute: the always-running instance
+- VPC/public IPv4: hourly public IP charge
+- EC2 other: mostly EBS root volume
 
-Do not run LM Studio generation on AWS.
+The new lightweight AWS image reduces disk usage and build time. It does not eliminate EC2 compute cost while the instance is running.
 
-AWS is the dashboard and product-data server. The local PC does generation and publishing.
+To reduce compute cost, stop the EC2 instance when it is not needed. Stopping Docker containers is not enough to stop EC2 billing.
+
+## Common Problems
+
+After `git pull`, old code still runs:
+
+```bash
+cd /opt/vnd
+BUILD=1 ./scripts/aws-start.sh
+```
+
+AWS dashboard cannot see generated descriptions:
+
+- confirm local generation created `listing_plan.json`
+- upload processed data back to AWS
+- refresh Boss Review
+
+Publishing tries to use old data:
+
+- re-download approved items with `sync-and-publish-ready.ps1`
+- confirm item has `listing_plan.json`
+
+AWS image becomes large again:
+
+- check `Dockerfile.backend`
+- confirm it does not run `playwright install chromium`
+- confirm it uses `requirements.aws-backend.txt`, not `requirements.txt`
+

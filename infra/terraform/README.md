@@ -5,7 +5,7 @@ This provisions a single low-cost EC2 host for the reviewer dashboard:
 - Ubuntu 24.04 in `eu-central-1` by default
 - Docker Engine and Docker Compose plugin
 - VND cloned from GitHub
-- `docker compose up -d --build`
+- `BUILD=1 ./scripts/aws-start.sh`
 - Streamlit dashboard exposed on port `8501`
 - FastAPI kept private by default
 

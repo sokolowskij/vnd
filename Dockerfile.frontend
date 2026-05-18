@@ -8,13 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies (minimal set for frontend)
-COPY requirements.txt .
-RUN pip install --no-cache-dir \
-    python-dotenv>=1.0.1 \
-    streamlit>=1.37.0 \
-    requests>=2.31.0 \
-    pydantic>=2.11.0
+# Install only the AWS dashboard runtime dependencies.
+COPY requirements.aws-frontend.txt .
+RUN pip install --no-cache-dir -r requirements.aws-frontend.txt
 
 # Copy application code
 COPY dashboard.py .

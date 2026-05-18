@@ -1,5 +1,7 @@
 # Bartosz Tutaj
 
+Current note: use `README.md` and `FINAL_README.md` as the source of truth. The current workflow is AWS Docker for the dashboard/API only, and local Windows Python for LM Studio generation and marketplace publishing. Do not use local Docker for the normal workflow.
+
 This is the practical handoff for this project: what worked, what did not work, which terminal to use, and the easiest way to give the project to another very novice developer.
 
 ## Best Setup For A New Novice Dev

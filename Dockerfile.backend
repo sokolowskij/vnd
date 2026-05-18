@@ -1,4 +1,4 @@
-# Backend service: FastAPI + Agent orchestration
+# Backend service: FastAPI dashboard/API runtime
 FROM python:3.11-slim as base
 
 # Set working directory
@@ -6,27 +6,24 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright browsers (needed for web automation)
-RUN playwright install chromium && \
-    playwright install-deps chromium
+# AWS backend is dashboard/API only. Local generation and publishing use
+# requirements.txt on the Windows PC, where Playwright/LM Studio run.
+COPY requirements.aws-backend.txt .
+RUN pip install --no-cache-dir -r requirements.aws-backend.txt
 
 # Copy application code
 COPY src/ /app/src/
 COPY pyproject.toml .
+COPY README.md .
 
-# Install the package in development mode
-RUN pip install -e .
+# Install package code without pulling local-only dependencies such as Playwright.
+RUN pip install --no-cache-dir --no-deps -e .
 
-# Create data directory for persistent state
-RUN mkdir -p /app/data/{products,ready_to_publish,auth,browser_profiles,results}
+# Create data directories for persistent dashboard state.
+RUN mkdir -p /app/data/{products,ready_to_publish,auth}
 
 # Expose API port
 EXPOSE 8000

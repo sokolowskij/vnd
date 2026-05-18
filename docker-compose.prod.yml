@@ -19,9 +19,7 @@ services:
       - "127.0.0.1:8000:8000"  # Only localhost
     
     environment:
-      # Production settings
-      - HEADLESS=true
-      - POST_MODE=publish  # Use real posting in production
+      # Production dashboard/API settings. Browser publishing runs locally.
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-30}
       # Keep others from .env
 
