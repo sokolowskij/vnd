@@ -15,6 +15,9 @@ data/
 browser_profiles/
 results/
 test_results/
+*.tgz
+*.tar.gz
+archive/
 
 # Editor and OS files
 .vscode/

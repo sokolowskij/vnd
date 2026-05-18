@@ -11,7 +11,7 @@ This guide is for a fresh Windows PC that should do the whole workflow locally:
 
 You do not need the LM Studio AWS tunnel for this workflow. The tunnel is only for the opposite setup: photos stay on AWS, but AWS calls LM Studio on your PC.
 
-Use one section only. If you are in PowerShell, use PowerShell. If your prompt looks like `C:\Users\barte>`, use CMD. If you are in Git Bash, use Bash.
+Use PowerShell when possible. If your prompt looks like `C:\Users\barte>`, use the CMD section instead.
 
 ## Before You Start
 
@@ -320,120 +320,6 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\sync-and-publish-ready.ps1" 
 powershell -ExecutionPolicy Bypass -File ".\scripts\sync-and-publish-ready.ps1" -Marketplaces facebook -PublishLocation "Warsaw, Poland"
 ```
 
-## Bash
-
-Use this section in Git Bash on Windows.
-
-### 1. Go To The Project
-
-```bash
-cd ~/Desktop/snn
-```
-
-On Bartosz's PC, `~` means `C:\Users\barte`.
-
-### 2. Set Up Python
-
-```bash
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-./.venv/Scripts/python.exe -m playwright install chromium
-[ -f .env ] || cp .env.example .env
-notepad .env
-```
-
-For LM Studio, `.env` should contain:
-
-```env
-LOCAL_MODEL_API=http://localhost:1234/v1
-OPENAI_API_KEY=local-model
-OPENAI_MODEL=google/gemma-4-e4b
-USER_DATA_DIR=browser_profiles
-```
-
-### 3. Download Uploaded Photos From AWS
-
-```bash
-KEY="$HOME/.ssh/vnd_aws"
-SERVER="ubuntu@51.102.104.11"
-COMPOSE="docker compose"
-
-ssh -i "$KEY" "$SERVER" "cd /opt/vnd && $COMPOSE exec -T backend tar -C /app/data/products -czf /tmp/products.tgz . && $COMPOSE cp backend:/tmp/products.tgz /tmp/products.tgz && ls -lh /tmp/products.tgz"
-scp -i "$KEY" "$SERVER:/tmp/products.tgz" ./server-products.tgz
-
-rm -rf ./data/server-products
-mkdir -p ./data/server-products
-tar -xzf ./server-products.tgz -C ./data/server-products
-```
-
-If AWS uses the production compose file, change only this line:
-
-```bash
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-```
-
-### 4. Generate Descriptions Locally
-
-Start LM Studio first. Enable the local server on port `1234`.
-
-```bash
-bash ./scripts/run-local-pipeline.sh -DataDir ./data/server-products -Mode dry_run -Marketplaces facebook -Recalculate
-```
-
-This reads local photos, calls local LM Studio, and writes generated `listing_plan.json` files. It does not publish anything.
-
-Useful options:
-
-```bash
-bash ./scripts/run-local-pipeline.sh -DataDir ./data/server-products -Mode dry_run -Marketplaces facebook
-bash ./scripts/run-local-pipeline.sh -DataDir ./data/server-products -Mode dry_run -Marketplaces olx,facebook -Recalculate
-```
-
-### 5. Upload Generated Descriptions Back To AWS
-
-```bash
-tar -czf ./server-products-processed.tgz -C ./data/server-products .
-scp -i "$KEY" ./server-products-processed.tgz "$SERVER:/tmp/server-products-processed.tgz"
-ssh -i "$KEY" "$SERVER" "cd /opt/vnd && $COMPOSE cp /tmp/server-products-processed.tgz backend:/tmp/server-products-processed.tgz && $COMPOSE exec -T backend tar -xzf /tmp/server-products-processed.tgz -C /app/data/products"
-```
-
-This sends the generated local data back to AWS. Then refresh Boss Review in the AWS app and approve the items.
-
-### 6. Download Approved Items And Publish Locally
-
-Bash does not have the one-command approved sync helper, so these commands do the same thing manually:
-
-```bash
-ssh -i "$KEY" "$SERVER" "cd /opt/vnd && $COMPOSE exec -T backend tar -C /app/data/ready_to_publish -czf /tmp/ready-to-publish.tgz . && $COMPOSE cp backend:/tmp/ready-to-publish.tgz /tmp/ready-to-publish.tgz && ls -lh /tmp/ready-to-publish.tgz"
-scp -i "$KEY" "$SERVER:/tmp/ready-to-publish.tgz" ./ready-to-publish.tgz
-
-rm -rf ./data/ready_to_publish
-mkdir -p ./data/ready_to_publish
-tar -xzf ./ready-to-publish.tgz -C ./data/ready_to_publish
-
-bash ./scripts/run-local-pipeline.sh -Mode publish -DataDir ./data/ready_to_publish -Marketplaces facebook
-```
-
-Log in to Facebook only:
-
-```bash
-bash ./scripts/run-local-pipeline.sh -AuthMode -Marketplaces facebook
-```
-
-Auto-publish:
-
-```bash
-bash ./scripts/run-local-pipeline.sh -Mode publish -DataDir ./data/ready_to_publish -Marketplaces facebook -AutoPublish -PublishingEmail you@example.com
-```
-
-Other useful options:
-
-```bash
-bash ./scripts/run-local-pipeline.sh -Mode publish -DataDir ./data/ready_to_publish -Marketplaces olx,facebook
-bash ./scripts/run-local-pipeline.sh -Mode publish -DataDir ./data/ready_to_publish -Marketplaces facebook -Yes
-bash ./scripts/run-local-pipeline.sh -Mode publish -DataDir ./data/ready_to_publish -Marketplaces facebook -PublishLocation "Warsaw, Poland"
-```
-
 ## Quick Decision Table
 
 Use this when you are unsure what to run:
@@ -456,7 +342,7 @@ Use this when you are unsure what to run:
 
 `%USERPROFILE%` does not work:
 
-- You are in PowerShell or Bash. Use `$env:USERPROFILE` in PowerShell or `$HOME` in Bash.
+- You are in PowerShell. Use `$env:USERPROFILE`.
 
 `Connection timed out`:
 

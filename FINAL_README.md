@@ -66,8 +66,26 @@ For frontend-only changes you can use:
 
 ```bash
 cd /opt/vnd
+FRONTEND_ONLY=1 ./scripts/aws-reload-frontend.sh
+```
+
+For normal pulled app updates where frontend and backend should stay aligned:
+
+```bash
+cd /opt/vnd
 ./scripts/aws-reload-frontend.sh
 ```
+
+Despite the name, `aws-reload-frontend.sh` rebuilds and recreates both `backend` and `frontend` unless `FRONTEND_ONLY=1` is set.
+
+Older direct Docker commands still work:
+
+```bash
+docker compose build backend frontend
+docker compose up -d --force-recreate backend frontend
+```
+
+Prefer the scripts because they handle health checks and the repo path consistently.
 
 Stop app containers without stopping the EC2 instance:
 
@@ -330,4 +348,3 @@ AWS image becomes large again:
 - check `Dockerfile.backend`
 - confirm it does not run `playwright install chromium`
 - confirm it uses `requirements.aws-backend.txt`, not `requirements.txt`
-

@@ -58,6 +58,12 @@ requirements.txt
 pyproject.toml
 ```
 
+Connect to AWS from local PowerShell:
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\vnd_aws ubuntu@51.102.104.11
+```
+
 Update AWS after pushing code:
 
 ```bash
@@ -69,12 +75,24 @@ BUILD=1 ./scripts/aws-start.sh
 
 Use `BUILD=1` after backend, frontend, Dockerfile, or dependency changes.
 
-For frontend-only changes:
+For normal app updates where backend/API and frontend should stay in sync:
 
 ```bash
 cd /opt/vnd
 ./scripts/aws-reload-frontend.sh
 ```
+
+Despite the script name, this rebuilds and recreates both `backend` and `frontend` by default.
+
+For true frontend-only changes:
+
+```bash
+cd /opt/vnd
+FRONTEND_ONLY=1 ./scripts/aws-reload-frontend.sh
+```
+
+Older commands like `docker compose build backend frontend` and
+`docker compose up -d --force-recreate backend frontend` still work, but the scripts above are the preferred interface.
 
 Check AWS services:
 
