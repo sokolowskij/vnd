@@ -363,6 +363,51 @@ def _rotate_image_file(file_path: Path, degrees: int) -> dict[str, Any]:
     return _product_summary(product_dir)
 
 
+def _remove_image_from_listing(product_dir: Path, image_name: str) -> None:
+    listing = _listing_for(product_dir)
+    if not listing:
+        return
+
+    remaining_images = [
+        path
+        for path in (listing.get("image_paths") or _current_image_paths(product_dir))
+        if Path(str(path)).name != image_name and _path_exists(str(path))
+    ]
+    if not remaining_images:
+        remaining_images = [
+            path
+            for path in _current_image_paths(product_dir)
+            if Path(str(path)).name != image_name and _path_exists(path)
+        ]
+
+    cover_image = listing.get("cover_image")
+    if cover_image and (Path(str(cover_image)).name == image_name or not _path_exists(str(cover_image))):
+        cover_image = remaining_images[0] if remaining_images else None
+
+    listing["image_paths"] = remaining_images
+    listing["cover_image"] = cover_image
+    _write_json(product_dir / "listing_plan.json", listing)
+
+
+def _delete_image_file(file_path: Path) -> dict[str, Any]:
+    product_dir = file_path.parent
+    image_name = file_path.name
+    file_path.unlink()
+    _remove_image_from_listing(product_dir, image_name)
+
+    status = _status_for(product_dir)
+    deleted_images = status.get("deleted_images") if isinstance(status.get("deleted_images"), list) else []
+    deleted_images.append({"filename": image_name, "deleted_at": datetime.utcnow().isoformat()})
+    _write_status(
+        product_dir,
+        {
+            "last_image_deleted_at": datetime.utcnow().isoformat(),
+            "deleted_images": deleted_images,
+        },
+    )
+    return _product_summary(product_dir)
+
+
 def _listing_for(product_dir: Path) -> dict[str, Any] | None:
     listing_path = product_dir / "listing_plan.json"
     if not listing_path.exists():
@@ -964,6 +1009,12 @@ async def rotate_product_image_by_request(
 async def get_product_file(product_id: str, filename: str, _: dict[str, str] = Depends(current_user)):
     file_path = _product_file_path(product_id, filename)
     return FileResponse(file_path)
+
+
+@app.delete("/products/{product_id}/files/{filename}")
+async def delete_product_image(product_id: str, filename: str, _: dict[str, str] = Depends(boss_user)):
+    file_path = _product_file_path(product_id, filename, require_image=True)
+    return _delete_image_file(file_path)
 
 
 @app.post("/products/{product_id}/files/{filename}/rotate")

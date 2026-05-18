@@ -62,7 +62,11 @@ TRANSLATIONS = {
         "Download product data": "Pobierz dane produktu",
         "Confirm delete": "Potwierdź usunięcie",
         "Delete product": "Usuń produkt",
+        "Delete photo": "Usuń zdjęcie",
+        "Confirm delete photo": "Potwierdź usunięcie zdjęcia",
+        "Cancel": "Anuluj",
         "Deleted.": "Usunięto.",
+        "Photo deleted.": "Zdjęcie usunięte.",
         "Category": "Kategoria",
         "Added by": "Dodał",
         "Added at": "Dodano",
@@ -379,6 +383,10 @@ def rotate_product_image(product: dict, image_name: str, degrees: int) -> None:
     )
 
 
+def delete_product_image(product: dict, image_name: str) -> None:
+    api_delete(f"/products/{quote(product['product_id'])}/files/{quote(image_name)}")
+
+
 def show_review_images(product: dict, max_images: int = 8) -> None:
     images = product.get("images", [])[:max_images]
     if not images:
@@ -395,7 +403,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
                 continue
 
             st.image(BytesIO(content), caption=image_name, use_container_width=True)
-            left, right = st.columns(2)
+            left, right, delete_col = st.columns(3)
             if left.button(
                 "↺",
                 key=f"rotate_left_{product['product_id']}_{image_name}",
@@ -407,6 +415,40 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
                 except requests.exceptions.RequestException as exc:
                     st.error(f"Rotation failed: {api_error_message(exc)}")
                 else:
+                    st.rerun()
+            delete_key = f"delete_photo_confirm_{product['product_id']}_{image_name}"
+            if delete_col.button(
+                "X",
+                key=f"delete_photo_{product['product_id']}_{image_name}",
+                help=T("Delete photo"),
+                use_container_width=True,
+            ):
+                st.session_state[delete_key] = True
+                st.rerun()
+
+            if st.session_state.get(delete_key):
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button(
+                    "OK",
+                    key=f"confirm_delete_photo_{product['product_id']}_{image_name}",
+                    help=T("Confirm delete photo"),
+                    use_container_width=True,
+                ):
+                    try:
+                        delete_product_image(product, image_name)
+                    except requests.exceptions.RequestException as exc:
+                        st.error(f"Delete failed: {api_error_message(exc)}")
+                    else:
+                        st.session_state.pop(delete_key, None)
+                        st.success(T("Photo deleted."))
+                        st.rerun()
+                if cancel_col.button(
+                    T("No"),
+                    key=f"cancel_delete_photo_{product['product_id']}_{image_name}",
+                    help=T("Cancel"),
+                    use_container_width=True,
+                ):
+                    st.session_state.pop(delete_key, None)
                     st.rerun()
             if right.button(
                 "↻",
