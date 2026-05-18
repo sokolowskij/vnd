@@ -201,6 +201,14 @@ def api_bytes(path: str) -> bytes:
     return response.content
 
 
+@st.cache_data(ttl=3600, max_entries=512, show_spinner=False)
+def cached_api_bytes(api_url: str, path: str, session_token: str | None, version: str) -> bytes:
+    headers = {"Authorization": f"Bearer {session_token}"} if session_token else {}
+    response = requests.get(f"{api_url}{path}", timeout=20, headers=headers)
+    response.raise_for_status()
+    return response.content
+
+
 def api_error_message(exc: requests.exceptions.RequestException) -> str:
     response = getattr(exc, "response", None)
     if response is None:
@@ -220,6 +228,23 @@ def format_datetime(value: str | None) -> str:
 
 def product_file_path(product: dict, image_name: str) -> str:
     return f"/products/{quote(product['product_id'])}/files/{quote(image_name)}"
+
+
+def image_cache_version(product: dict, image_name: str) -> str:
+    rotations = product.get("image_rotations") or {}
+    rotation = rotations.get(image_name) if isinstance(rotations, dict) else None
+    if isinstance(rotation, dict):
+        return str(rotation.get("updated_at") or rotation.get("count") or rotation.get("degrees") or "original")
+    return "original"
+
+
+def product_image_bytes(product: dict, image_name: str) -> bytes:
+    return cached_api_bytes(
+        API_URL,
+        product_file_path(product, image_name),
+        st.session_state.get("session_token"),
+        image_cache_version(product, image_name),
+    )
 
 
 def current_user() -> dict | None:
@@ -369,7 +394,7 @@ def show_thumbnails(product: dict, max_images: int = 8) -> None:
     for index, image_name in enumerate(images):
         with columns[index % len(columns)]:
             try:
-                content = api_bytes(product_file_path(product, image_name))
+                content = product_image_bytes(product, image_name)
             except requests.exceptions.RequestException:
                 st.warning(image_name)
             else:
@@ -397,7 +422,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
     for index, image_name in enumerate(images):
         with columns[index % len(columns)]:
             try:
-                content = api_bytes(product_file_path(product, image_name))
+                content = product_image_bytes(product, image_name)
             except requests.exceptions.RequestException:
                 st.warning(image_name)
                 continue
@@ -415,6 +440,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
                 except requests.exceptions.RequestException as exc:
                     st.error(f"Rotation failed: {api_error_message(exc)}")
                 else:
+                    cached_api_bytes.clear()
                     st.rerun()
             delete_key = f"delete_photo_confirm_{product['product_id']}_{image_name}"
             if delete_col.button(
@@ -439,6 +465,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
                     except requests.exceptions.RequestException as exc:
                         st.error(f"Delete failed: {api_error_message(exc)}")
                     else:
+                        cached_api_bytes.clear()
                         st.session_state.pop(delete_key, None)
                         st.success(T("Photo deleted."))
                         st.rerun()
@@ -461,6 +488,7 @@ def show_review_images(product: dict, max_images: int = 8) -> None:
                 except requests.exceptions.RequestException as exc:
                     st.error(f"Rotation failed: {api_error_message(exc)}")
                 else:
+                    cached_api_bytes.clear()
                     st.rerun()
 
 
@@ -472,7 +500,7 @@ def show_preview_image(product: dict) -> None:
 
     image_name = images[0]
     try:
-        content = api_bytes(product_file_path(product, image_name))
+        content = product_image_bytes(product, image_name)
     except requests.exceptions.RequestException:
         st.caption(T("Preview unavailable"))
     else:
@@ -763,6 +791,7 @@ def upload_page() -> None:
             except requests.exceptions.RequestException as exc:
                 st.error(f"Upload failed: {exc}")
             else:
+                cached_api_bytes.clear()
                 st.success(f"{T('Uploaded')} {result['product_id']}")
 
 
